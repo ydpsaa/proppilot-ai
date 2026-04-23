@@ -14,17 +14,51 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { min-height: 100%; }
-    body { background: #060710; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    body {
+      background: #05070f;
+      color: #F1F5F9;
+      font-family: 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background-image:
+        radial-gradient(ellipse 90% 60% at 5% -5%, rgba(59,130,246,0.28) 0%, transparent 55%),
+        radial-gradient(ellipse 70% 50% at 95% 90%, rgba(167,139,250,0.22) 0%, transparent 50%),
+        radial-gradient(ellipse 60% 70% at 50% 50%, rgba(20,184,166,0.08) 0%, transparent 65%);
+      background-attachment: fixed;
+    }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
     button, input { font-family: inherit; }
 
-    @keyframes pulse  { 0%,100%{opacity:1} 50%{opacity:0.35} }
-    @keyframes spin   { to{transform:rotate(360deg)} }
-    @keyframes slideIn{ from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
-    @keyframes glow   { 0%,100%{box-shadow:0 0 0 0 rgba(245,166,35,.4)} 50%{box-shadow:0 0 0 10px rgba(245,166,35,0)} }
+    @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.35} }
+    @keyframes spin    { to{transform:rotate(360deg)} }
+    @keyframes slideIn { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes pp-float{ 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-8px) scale(1.02)} }
 
-    .anim { animation: slideIn 0.5s ease forwards; }
+    .anim  { animation: slideIn 0.5s ease forwards; }
     .pulse { animation: pulse 1.8s ease-in-out infinite; }
+
+    /* Ambient orbs */
+    #root::before, #root::after {
+      content: '';
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(80px);
+    }
+    #root::before {
+      width: 800px; height: 800px;
+      top: -300px; left: -250px;
+      background: radial-gradient(circle, rgba(59,130,246,0.22), transparent 65%);
+      animation: pp-float 12s ease-in-out infinite;
+    }
+    #root::after {
+      width: 700px; height: 700px;
+      bottom: -200px; right: -200px;
+      background: radial-gradient(circle, rgba(167,139,250,0.18), transparent 65%);
+      animation: pp-float 16s ease-in-out infinite reverse;
+    }
 
     @media (max-width: 860px) {
       .grid-2  { grid-template-columns: 1fr !important; }
@@ -421,8 +455,8 @@ function buildSignal({ closes, candles, newsEvents = [] }) {
 const C = {
   amber:'#F5A623', green:'#34D399', red:'#F87171', yellow:'#FBBF24',
   indigo:'#818CF8', teal:'#2DD4BF',
-  bg:'#060710', text:'#F1F5F9', sub:'#94A3B8', muted:'#475569',
-  border:'rgba(255,255,255,0.07)', surf:'rgba(255,255,255,0.04)',
+  bg:'#05070f', text:'#F1F5F9', sub:'#94A3B8', muted:'#4B5A72',
+  border:'rgba(255,255,255,0.1)', surf:'rgba(255,255,255,0.07)',
 };
 
 const STATE_META = {
@@ -455,8 +489,9 @@ const dispSym = s => ({ QQQ:'NAS100 (QQQ)', SPY:'S&P500 (SPY)', DIA:'Dow Jones (
 // UI COMPONENTS
 // ══════════════════════════════════════════════════════════════════════════
 
-const card  = { background:C.surf, border:`1px solid ${C.border}`, borderRadius:16, padding:24 };
-const cardS = { background:C.surf, border:`1px solid ${C.border}`, borderRadius:12, padding:16 };
+const GLASS = { background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', backdropFilter:'blur(24px) saturate(160%)', WebkitBackdropFilter:'blur(24px) saturate(160%)', boxShadow:'0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.14)' };
+const card  = { ...GLASS, borderRadius:16, padding:24 };
+const cardS = { ...GLASS, borderRadius:12, padding:16 };
 
 function IndBar({ label, value, pct, status, color }) {
   return (
@@ -957,15 +992,15 @@ function SignalEngine() {
   const meta = sig ? (STATE_META[sig.state]||STATE_META.AVOID_CHOP) : null;
 
   return (
-    <div style={{ minHeight: EMBEDDED ? 'auto' : '100vh', background:C.bg, color:C.text }}>
+    <div style={{ minHeight: EMBEDDED ? 'auto' : '100vh', color:C.text, position:'relative', zIndex:1 }}>
 
       {/* ── NAV ── */}
       {!EMBEDDED && (
-        <div style={{ borderBottom:`1px solid ${C.border}`, background:'rgba(6,7,16,0.96)', padding:'0 32px', position:'sticky', top:0, zIndex:100 }}>
+        <div style={{ borderBottom:'1px solid rgba(255,255,255,0.08)', background:'rgba(5,7,15,0.75)', backdropFilter:'blur(24px)', WebkitBackdropFilter:'blur(24px)', padding:'0 32px', position:'sticky', top:0, zIndex:100 }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:58 }}>
             <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-              <div style={{ width:30,height:30,borderRadius:8,background:`linear-gradient(135deg,${C.amber},#B85500)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:900 }}>✈</div>
-              <span style={{ fontWeight:900,fontSize:16,letterSpacing:'-0.03em' }}>PropPilot <span style={{color:C.amber}}>AI</span></span>
+              <div style={{ width:34,height:34,borderRadius:10,background:'linear-gradient(135deg,#3B82F6,#14B8A6)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:900,color:'#fff',boxShadow:'0 0 20px rgba(59,130,246,0.4)' }}>P</div>
+              <span style={{ fontWeight:900,fontSize:16,letterSpacing:'-0.03em' }}>PropPilot <span style={{color:'#3B82F6'}}>AI</span></span>
               <span style={{ color:C.muted,fontSize:12,marginLeft:4 }}>/ Signal Engine</span>
             </div>
             <div style={{ display:'flex', gap:10, alignItems:'center' }}>

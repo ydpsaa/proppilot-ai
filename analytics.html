@@ -40,9 +40,9 @@
       font-family: 'Inter', system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
       background-image:
-        radial-gradient(ellipse 80% 50% at 10% 0%, rgba(59,130,246,0.12) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 90% 80%, rgba(167,139,250,0.08) 0%, transparent 50%),
-        radial-gradient(ellipse 50% 60% at 50% 50%, rgba(20,184,166,0.04) 0%, transparent 70%);
+        radial-gradient(ellipse 90% 60% at 5% -5%, rgba(59,130,246,0.28) 0%, transparent 55%),
+        radial-gradient(ellipse 70% 50% at 95% 90%, rgba(167,139,250,0.22) 0%, transparent 50%),
+        radial-gradient(ellipse 60% 70% at 50% 50%, rgba(20,184,166,0.08) 0%, transparent 65%);
       background-attachment: fixed;
     }
     ::-webkit-scrollbar { width: 5px; }
@@ -63,33 +63,33 @@
       filter: blur(80px);
     }
     #root::before {
-      width: 600px; height: 600px;
-      top: -200px; left: -200px;
-      background: radial-gradient(circle, rgba(59,130,246,0.1), transparent 70%);
+      width: 800px; height: 800px;
+      top: -300px; left: -250px;
+      background: radial-gradient(circle, rgba(59,130,246,0.22), transparent 65%);
       animation: pp-float 12s ease-in-out infinite;
     }
     #root::after {
-      width: 500px; height: 500px;
-      bottom: -150px; right: -150px;
-      background: radial-gradient(circle, rgba(167,139,250,0.08), transparent 70%);
+      width: 700px; height: 700px;
+      bottom: -200px; right: -200px;
+      background: radial-gradient(circle, rgba(167,139,250,0.18), transparent 65%);
       animation: pp-float 16s ease-in-out infinite reverse;
     }
 
     /* Glass panel */
     .glass-panel {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
       border-radius: var(--pp-radius);
-      backdrop-filter: var(--glass-blur);
-      -webkit-backdrop-filter: var(--glass-blur);
-      box-shadow: var(--pp-shadow), var(--glass-highlight);
+      backdrop-filter: blur(24px) saturate(160%);
+      -webkit-backdrop-filter: blur(24px) saturate(160%);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.14);
       position: relative;
     }
     .glass-panel::before {
       content: '';
       position: absolute;
       top: 0; left: 0; right: 0; height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent);
       border-radius: var(--pp-radius) var(--pp-radius) 0 0;
     }
 
@@ -130,7 +130,7 @@ const C = {
   border:'rgba(255,255,255,0.1)', surf:'rgba(255,255,255,0.045)',
 };
 
-const GLASS = { background:'rgba(255,255,255,0.045)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:16, backdropFilter:'blur(24px)', WebkitBackdropFilter:'blur(24px)', boxShadow:'0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)' };
+const GLASS = { background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, backdropFilter:'blur(24px) saturate(160%)', WebkitBackdropFilter:'blur(24px) saturate(160%)', boxShadow:'0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.14)' };
 const card  = { ...GLASS, padding: 24 };
 const cardS = { ...GLASS, padding: 16 };
 
