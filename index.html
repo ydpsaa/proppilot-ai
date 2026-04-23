@@ -236,13 +236,218 @@
       .pp-heatmap-day .hm-date { font-size: 7px !important; }
       .pp-heatmap-day .hm-val  { font-size: 8px !important; }
     }
+
+    /* ── Dot grid texture (glass needs something to blur) ── */
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
+    /* ── Toast system ── */
+    @keyframes pp-toast-in  { from { opacity:0; transform:translateX(110%); } to { opacity:1; transform:translateX(0); } }
+    @keyframes pp-toast-out { from { opacity:1; transform:translateX(0); }   to { opacity:0; transform:translateX(110%); } }
+    .pp-toast-wrap { position:fixed; top:76px; right:18px; z-index:9999; display:flex; flex-direction:column; gap:8px; pointer-events:none; }
+    .pp-toast {
+      min-width:280px; max-width:340px; padding:14px 16px; border-radius:14px;
+      backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px);
+      border:1px solid rgba(255,255,255,0.14);
+      box-shadow:0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+      pointer-events:all; animation:pp-toast-in 0.3s cubic-bezier(0.34,1.56,0.64,1) forwards;
+      display:flex; gap:12px; align-items:flex-start;
+    }
+    .pp-toast.exiting { animation:pp-toast-out 0.28s ease forwards; }
+
+    /* ── Phase gate bar ── */
+    .pp-phase-gate-bar {
+      display:flex; align-items:center; gap:14px; padding:8px 24px;
+      border-bottom:1px solid rgba(255,255,255,0.06);
+      background:rgba(5,7,15,0.4);
+      font-size:11px; font-weight:700; overflow-x:auto; white-space:nowrap;
+    }
+    .pp-gate-item { display:flex; align-items:center; gap:7px; }
+    .pp-gate-bar-track { width:80px; height:5px; background:rgba(255,255,255,0.07); border-radius:999px; overflow:hidden; }
+    .pp-gate-bar-fill  { height:100%; border-radius:999px; transition:width 0.6s ease; }
+
+    /* ── Today strip ── */
+    .pp-today-strip {
+      display:grid; grid-template-columns:repeat(4,1fr); gap:1px;
+      background:rgba(255,255,255,0.06); border-radius:14px; overflow:hidden;
+      margin-bottom:20px; border:1px solid rgba(255,255,255,0.08);
+    }
+    .pp-today-cell {
+      background:rgba(255,255,255,0.04); padding:14px 18px;
+      backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+    }
+
+    /* ── Hero equity ── */
+    .pp-hero-equity { font-size:clamp(40px,6vw,72px); font-weight:900; letter-spacing:-0.04em; line-height:1; }
+
+    /* ── Analyze Now button ── */
+    .pp-analyze-btn {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:12px 24px; border-radius:12px; border:none; cursor:pointer;
+      background:linear-gradient(135deg,rgba(59,130,246,0.9),rgba(20,184,166,0.8));
+      color:#fff; font-weight:900; font-size:14px;
+      box-shadow:0 0 30px rgba(59,130,246,0.35), inset 0 1px 0 rgba(255,255,255,0.2);
+      transition:all 0.2s ease;
+      font-family:inherit;
+    }
+    .pp-analyze-btn:hover { box-shadow:0 0 50px rgba(59,130,246,0.5), inset 0 1px 0 rgba(255,255,255,0.2); transform:translateY(-1px); }
+    .pp-analyze-btn:disabled { opacity:0.5; cursor:not-allowed; transform:none; }
+    @keyframes pp-analyze-pulse { 0%,100%{box-shadow:0 0 30px rgba(59,130,246,0.35)} 50%{box-shadow:0 0 60px rgba(59,130,246,0.6)} }
+    .pp-analyze-btn.idle { animation:pp-analyze-pulse 3s ease-in-out infinite; }
+
+    /* ── Signal progress card ── */
+    .pp-signal-card { transition:transform 0.15s ease, box-shadow 0.15s ease; }
+    .pp-signal-card:hover { transform:translateY(-2px); box-shadow:0 16px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.14); }
+    .pp-tp-track { height:6px; background:rgba(255,255,255,0.07); border-radius:999px; overflow:hidden; position:relative; }
+    .pp-tp-fill  { height:100%; border-radius:999px; transition:width 0.8s cubic-bezier(0.34,1.2,0.64,1); position:absolute; top:0; left:0; }
+
+    /* ── Section label ── */
+    .pp-section-label { font-size:11px; font-weight:800; letter-spacing:0.08em; color:var(--pp-muted); text-transform:uppercase; margin-bottom:12px; }
+    .pp-section-title { font-size:18px; font-weight:800; margin-bottom:4px; }
+    .pp-section-sub   { font-size:13px; color:var(--pp-sub); }
   </style>
 </head>
 <body>
 <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useEffect, useRef, useCallback, useMemo } = React;
+const { useState, useEffect, useRef, useCallback, useMemo, createContext, useContext } = React;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TOAST SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+const ToastCtx = createContext({ show: () => {} });
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+  const show = useCallback((msg, type = 'info', dur = 4200) => {
+    const id = Date.now() + Math.random();
+    setToasts(prev => [...prev.slice(-4), { id, msg, type, exiting: false }]);
+    setTimeout(() => {
+      setToasts(prev => prev.map(t => t.id === id ? { ...t, exiting: true } : t));
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 320);
+    }, dur);
+  }, []);
+  const ICONS = { success:'✅', error:'❌', info:'🔔', warn:'⚠️', signal:'⚡', outcome:'📊' };
+  const BG    = { success:'rgba(16,185,129,0.13)', error:'rgba(239,68,68,0.13)', info:'rgba(59,130,246,0.13)', warn:'rgba(245,158,11,0.13)', signal:'rgba(59,130,246,0.13)', outcome:'rgba(167,139,250,0.13)' };
+  const BD    = { success:'rgba(16,185,129,0.3)',  error:'rgba(239,68,68,0.3)',  info:'rgba(59,130,246,0.3)',  warn:'rgba(245,158,11,0.3)',  signal:'rgba(59,130,246,0.3)',  outcome:'rgba(167,139,250,0.3)'  };
+  return (
+    <ToastCtx.Provider value={{ show }}>
+      {children}
+      <div className="pp-toast-wrap">
+        {toasts.map(t => (
+          <div key={t.id} className={`pp-toast${t.exiting ? ' exiting' : ''}`}
+            style={{ background: BG[t.type]||BG.info, borderColor: BD[t.type]||BD.info }}>
+            <span style={{ fontSize:20, lineHeight:1, flexShrink:0 }}>{ICONS[t.type]||ICONS.info}</span>
+            <div>
+              <div style={{ color:'#F1F5F9', fontSize:13, lineHeight:1.55, fontWeight:600 }}>{t.msg}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </ToastCtx.Provider>
+  );
+}
+const useToast = () => useContext(ToastCtx);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANIMATED NUMBER COUNTER
+// ═══════════════════════════════════════════════════════════════════════════
+function AnimNum({ value, prefix = '', suffix = '', decimals = 0, color, style: extra }) {
+  const [display, setDisplay] = useState(Number(value) || 0);
+  const prev = useRef(Number(value) || 0);
+  const raf  = useRef(null);
+  useEffect(() => {
+    const end = Number(value) || 0;
+    const start = prev.current;
+    prev.current = end;
+    if (Math.abs(end - start) < 0.01) { setDisplay(end); return; }
+    cancelAnimationFrame(raf.current);
+    const dur = 900;
+    const t0 = performance.now();
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / dur);
+      const ease = 1 - Math.pow(1 - p, 3);
+      setDisplay(start + (end - start) * ease);
+      if (p < 1) { raf.current = requestAnimationFrame(step); }
+    };
+    raf.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf.current);
+  }, [value]);
+  const fmt = decimals > 0 ? display.toFixed(decimals) : Math.round(display).toLocaleString('en-US');
+  return <span style={{ color, ...extra }}>{prefix}{fmt}{suffix}</span>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONFIDENCE RING
+// ═══════════════════════════════════════════════════════════════════════════
+function ConfRing({ score = 0, size = 44 }) {
+  const r    = (size - 6) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = (Math.min(100, Math.max(0, score)) / 100) * circ;
+  const col  = score >= 70 ? '#10B981' : score >= 50 ? '#F59E0B' : '#EF4444';
+  return (
+    <div style={{ position:'relative', width:size, height:size, flexShrink:0 }}>
+      <svg width={size} height={size} style={{ transform:'rotate(-90deg)' }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth={5}/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={col} strokeWidth={5}
+          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
+          style={{ transition:'stroke-dasharray 0.8s ease' }}/>
+      </svg>
+      <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, fontWeight:900, color:col }}>
+        {score}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TP/SL PROGRESS BAR
+// ═══════════════════════════════════════════════════════════════════════════
+function TpSlBar({ entry, tp1, tp2, sl, currentPrice, direction }) {
+  if (!entry || !sl) return null;
+  const isLong = direction === 'LONG' || (tp1 && tp1 > entry);
+  const slDist  = Math.abs(entry - sl);
+  const tp1Dist = tp1 ? Math.abs(tp1 - entry) : slDist * 1.5;
+  const tp2Dist = tp2 ? Math.abs(tp2 - entry) : slDist * 2.5;
+  const total   = tp2Dist + slDist;
+  const slPct   = (slDist / total) * 100;
+  const tp1Pct  = (tp1Dist / total) * 100;
+  const tp2Pct  = (tp2Dist / total) * 100;
+
+  // Current price progress
+  let curPct = 50; // entry = center
+  if (currentPrice) {
+    const fromEntry = isLong ? currentPrice - entry : entry - currentPrice;
+    curPct = 50 + (fromEntry / total) * 100;
+    curPct = Math.max(2, Math.min(98, curPct));
+  }
+
+  return (
+    <div style={{ marginTop:10 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'rgba(148,163,184,0.7)', marginBottom:5 }}>
+        <span style={{ color:'#EF4444' }}>SL {sl?.toFixed(2)}</span>
+        <span style={{ color:'rgba(148,163,184,0.5)' }}>Entry {entry?.toFixed(2)}</span>
+        {tp1 && <span style={{ color:'#34D399' }}>TP1 {tp1?.toFixed(2)}</span>}
+        {tp2 && <span style={{ color:'#10B981' }}>TP2 {tp2?.toFixed(2)}</span>}
+      </div>
+      <div className="pp-tp-track">
+        {/* SL zone */}
+        <div className="pp-tp-fill" style={{ width:`${slPct}%`, background:'rgba(239,68,68,0.35)', left:0 }}/>
+        {/* TP zone */}
+        <div className="pp-tp-fill" style={{ width:`${tp2Pct}%`, background:'rgba(16,185,129,0.25)', right:0, left:'auto' }}/>
+        {/* TP1 marker */}
+        {tp1 && <div style={{ position:'absolute', top:0, bottom:0, left:`${slPct + (tp1Pct/(tp1Pct+tp2Pct))*(tp2Pct)}%`, width:2, background:'rgba(52,211,153,0.6)' }}/>}
+        {/* Current price cursor */}
+        {currentPrice && <div style={{ position:'absolute', top:-3, bottom:-3, left:`${curPct}%`, width:2, background:'#fff', borderRadius:1, boxShadow:'0 0 6px rgba(255,255,255,0.8)' }}/>}
+      </div>
+    </div>
+  );
+}
 
 // ── localStorage helpers ──────────────────────────────────────────────────
 const LS = {
@@ -2956,133 +3161,282 @@ function DayHeatmap({ signals }) {
 }
 
 function ExecutiveDashboard({ data, phase }) {
-  const account = data.account || {};
-  const positions = data.positions || [];
+  const { show: showToast } = useToast();
+  const account       = data.account || {};
+  const positions     = data.positions || [];
+  const allSignals    = data.signals || [];
   const openPositions = positions.filter(p => p.status === 'OPEN' || p.status === 'TP1_HIT');
-  const activeSignals = (data.signals || []).filter(s => ['LONG_NOW', 'SHORT_NOW'].includes(s.signal_state) && s.outcome === 'OPEN').slice(0, 6);
+  const activeSignals = allSignals.filter(s => ['LONG_NOW','SHORT_NOW'].includes(s.signal_state) && s.outcome === 'OPEN').slice(0, 6);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const equity  = safeNum(account.equity,  safeNum(account.balance, 100000)) || 100000;
+  const balance = safeNum(account.balance, 100000) || 100000;
+  const openPnl = safeNum(account.open_pnl, 0) || 0;
+  const dailyPnl= safeNum(account.daily_pnl_usd, 0) || 0;
+  const equityGain = equity - 100000;
+  const equityPct  = (equityGain / 100000) * 100;
+  const equityColor = equityGain >= 0 ? T.green : T.red;
+
   const dailyMode = (() => {
-    const bal = safeNum(account.balance, 100000) || 100000;
-    const daily = Math.abs(Math.min(0, safeNum(account.daily_pnl_usd, 0) || 0));
-    const limit = bal * ((safeNum(data.settings?.daily_loss_limit_pct, 2) || 2) / 100);
-    const used = limit > 0 ? (daily / limit) * 100 : 0;
-    return used < 40 ? { label:'NORMAL', color:T.green } : used < 75 ? { label:'DEFENSIVE', color:T.amber } : { label:'STOP', color:T.red };
+    const limit = balance * ((safeNum(data.settings?.daily_loss_limit_pct, 2) || 2) / 100);
+    const used  = Math.abs(Math.min(0, dailyPnl));
+    const pct   = limit > 0 ? (used / limit) * 100 : 0;
+    return pct < 40 ? { label:'NORMAL', color:T.green, icon:'✅' }
+         : pct < 75 ? { label:'DEFENSIVE', color:T.amber, icon:'⚠️' }
+                    : { label:'STOP', color:T.red, icon:'🛑' };
   })();
+
+  // Session detector
+  const sessionNow = (() => {
+    const h = new Date().getUTCHours();
+    if (h >= 7  && h < 12) return { name:'London', color:'#3B82F6', icon:'🇬🇧' };
+    if (h >= 12 && h < 17) return { name:'New York', color:'#A78BFA', icon:'🗽' };
+    if (h >= 0  && h < 7)  return { name:'Asian', color:'#F59E0B', icon:'🌏' };
+    return { name:'Off-Hours', color:T.muted, icon:'🌙' };
+  })();
+
+  // Today's signals count
+  const today = new Date().toISOString().slice(0,10);
+  const todaySignals = allSignals.filter(s => s.created_at?.startsWith(today)).length;
+  const resolvedToday = allSignals.filter(s => s.outcome !== 'OPEN' && (s.outcome_at || s.created_at)?.startsWith(today)).length;
+
+  // Equity curve points
   const equityPoints = (data.snapshots || []).slice(-60).map(s => ({
     label: new Date(s.created_at).toLocaleDateString('en-GB', { month:'short', day:'numeric' }),
     value: safeNum(s.equity, safeNum(s.balance, 0)) || 0,
   }));
+
+  // Session win rates
   const sessionGroups = {};
-  (data.signals || []).filter(s => s.outcome !== 'OPEN').forEach(s => {
+  allSignals.filter(s => s.outcome !== 'OPEN').forEach(s => {
     const key = sessionLabel(s.session_name);
     if (!sessionGroups[key]) sessionGroups[key] = { w:0, l:0 };
-    if (['TP1_HIT', 'TP2_HIT'].includes(s.outcome)) sessionGroups[key].w += 1;
-    if (s.outcome === 'SL_HIT') sessionGroups[key].l += 1;
+    if (['TP1_HIT','TP2_HIT'].includes(s.outcome)) sessionGroups[key].w++;
+    if (s.outcome === 'SL_HIT') sessionGroups[key].l++;
   });
   const sessionRows = Object.entries(sessionGroups).map(([k, v]) => {
     const total = v.w + v.l;
     return { name:k, total, wr: total ? (v.w / total) * 100 : 0 };
   }).sort((a, b) => b.wr - a.wr).slice(0, 4);
+
+  const handleAnalyzeNow = async () => {
+    setAnalyzing(true);
+    showToast('⚡ Запускаем автоанализ всех инструментов…', 'signal', 3000);
+    try {
+      const r = await fetch(`${SB_URL}/functions/v1/auto-analyze`, {
+        method: 'POST',
+        headers: { ...SB_HDR, 'Content-Type':'application/json' },
+        body: JSON.stringify({ symbols:['XAU/USD','EUR/USD','GBP/USD','USD/JPY','NAS100','BTC/USD'] }),
+      });
+      if (r.ok) {
+        showToast('✅ Анализ завершён! Сигналы обновляются…', 'success', 5000);
+        setTimeout(() => data.refresh('updating'), 2500);
+      } else {
+        showToast('⚠️ Edge Function не отвечает. Запусти bash deploy.sh', 'warn', 6000);
+      }
+    } catch {
+      showToast('❌ Нет связи с Edge Function. Проверь деплой.', 'error', 6000);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   return (
     <div className="pp-grid" style={{ gap:20 }}>
-      <div className="pp-panel" style={{ padding: 20 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16, flexWrap:'wrap' }}>
+
+      {/* ── HERO ROW ── */}
+      <div className="pp-panel" style={{ padding:28, background:'rgba(255,255,255,0.06)' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:24, flexWrap:'wrap' }}>
+
+          {/* Big equity number */}
           <div>
-            <div style={{ color:T.indigo, fontSize:11, fontWeight:800, letterSpacing:'.06em', marginBottom:10 }}>PRE-SESSION BRIEF</div>
-            <div style={{ fontSize:30, fontWeight:900, letterSpacing:'-.03em', marginBottom:10 }}>Unified operator view for Phase {phase.toUpperCase()}</div>
-            <div style={{ color:T.sub, fontSize:14, lineHeight:1.7, maxWidth:760 }}>
-              {data.memory?.[0]?.market_notes || 'No fresh memory note yet. Live paper account, open positions, signal outcomes and challenge buffer are connected below.'}
+            <div className="pp-section-label">PAPER ACCOUNT · FTMO CHALLENGE</div>
+            <div className="pp-hero-equity" style={{ color:equityColor }}>
+              <AnimNum value={equity} prefix="$" decimals={0} color={equityColor}/>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:16, marginTop:10 }}>
+              <span style={{ color:equityColor, fontSize:16, fontWeight:700 }}>
+                {equityGain >= 0 ? '+' : ''}<AnimNum value={equityGain} prefix="$" decimals={0} color={equityColor}/>
+                {' '}({equityPct >= 0 ? '+' : ''}{equityPct.toFixed(2)}%)
+              </span>
+              <span style={{ color:T.muted, fontSize:13 }}>vs start $100,000</span>
+            </div>
+            <div style={{ display:'flex', gap:20, marginTop:14 }}>
+              <span style={{ color:T.sub, fontSize:13 }}>Open P&L <strong style={{ color: openPnl >= 0 ? T.green : T.red }}>{fmtUsd(openPnl)}</strong></span>
+              <span style={{ color:T.sub, fontSize:13 }}>Today <strong style={{ color: dailyPnl >= 0 ? T.green : T.red }}>{fmtUsd(dailyPnl)}</strong></span>
+              <span style={{ color:T.sub, fontSize:13 }}>Mode <strong style={{ color:dailyMode.color }}>{dailyMode.icon} {dailyMode.label}</strong></span>
             </div>
           </div>
-          <div className="pp-panel-solid" style={{ padding:14, minWidth:220 }}>
-            <div style={{ color:T.muted, fontSize:10, fontWeight:800, letterSpacing:'.05em' }}>DAILY MODE</div>
-            <div style={{ color:dailyMode.color, fontWeight:900, fontSize:26, marginTop:6 }}>{dailyMode.label}</div>
-            <div style={{ color:T.sub, fontSize:12, marginTop:8 }}>{account.kill_switch_active ? 'Kill-switch active' : `${openPositions.length} open positions · ${activeSignals.length} actionable signals`}</div>
+
+          {/* Analyze Now CTA */}
+          <div style={{ display:'flex', flexDirection:'column', gap:12, alignItems:'flex-end' }}>
+            <button
+              className={`pp-analyze-btn${analyzing ? '' : ' idle'}`}
+              onClick={handleAnalyzeNow}
+              disabled={analyzing}
+            >
+              {analyzing
+                ? <><span style={{ display:'inline-block', animation:'pp-spin 0.8s linear infinite', width:16, height:16, border:'2px solid rgba(255,255,255,0.4)', borderTopColor:'#fff', borderRadius:'50%' }}/> Analyzing…</>
+                : <>⚡ Analyze Now</>
+              }
+            </button>
+            <div style={{ color:T.muted, fontSize:11, textAlign:'right' }}>
+              {activeSignals.length > 0
+                ? <><span style={{ color:T.green }}>●</span> {activeSignals.length} actionable signals</>
+                : <><span style={{ color:T.muted }}>○</span> No actionable signals</>
+              }
+            </div>
+            {data.memory?.[0]?.market_notes && (
+              <div style={{ maxWidth:280, padding:'10px 14px', background:'rgba(129,140,248,0.08)', border:'1px solid rgba(129,140,248,0.2)', borderRadius:10 }}>
+                <div style={{ fontSize:10, color:'#818CF8', fontWeight:800, marginBottom:5, letterSpacing:'.06em' }}>🧠 AI READ</div>
+                <p style={{ color:T.sub, fontSize:12, lineHeight:1.6, margin:0 }}>{data.memory[0].market_notes.slice(0,140)}…</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      <div className="pp-grid pp-grid-4x">
-        <ShellKpi label="Equity" value={fmtUsd(account.equity || account.balance || 100000)} sub={`Balance ${fmtUsd(account.balance || 100000)} · Open P&L ${fmtUsd(account.open_pnl || 0)}`} color={(safeNum(account.equity, 0) || 0) >= (safeNum(account.balance, 0) || 0) ? T.green : T.red}/>
-        <ShellKpi label="Active Signals" value={activeSignals.length} sub={`${(data.signals || []).filter(s => s.outcome === 'OPEN').length} open analyses`} color={activeSignals.length ? T.indigo : T.sub}/>
-        <ShellKpi label="Win Rate" value={`${safeNum(account.win_rate_pct, 0)?.toFixed?.(0) || '0'}%`} sub={`${safeNum(account.win_trades, 0) || 0}W / ${safeNum(account.loss_trades, 0) || 0}L`} color={(safeNum(account.win_rate_pct, 0) || 0) >= 50 ? T.green : T.red}/>
-        <ShellKpi label="Risk Buffer" value={fmtUsd((safeNum(account.balance, 100000) || 100000) * ((safeNum(data.settings?.daily_loss_limit_pct, 2) || 2) / 100) - Math.abs(Math.min(0, safeNum(account.daily_pnl_usd, 0) || 0)))} sub={`Daily P&L ${fmtUsd(account.daily_pnl_usd || 0)} · limit ${data.settings?.daily_loss_limit_pct || 2}%`} color={dailyMode.color}/>
+      {/* ── TODAY STRIP ── */}
+      <div className="pp-today-strip">
+        {[
+          { icon:sessionNow.icon, label:'Session', value:sessionNow.name, color:sessionNow.color },
+          { icon:'⚡', label:'Signals today', value:todaySignals, color:T.indigo },
+          { icon:'✅', label:'Resolved today', value:resolvedToday, color: resolvedToday > 0 ? T.green : T.muted },
+          { icon:'📋', label:'Open positions', value:openPositions.length, color: openPositions.length > 0 ? T.amber : T.muted },
+        ].map(({ icon, label, value, color }) => (
+          <div key={label} className="pp-today-cell">
+            <div style={{ fontSize:18, marginBottom:6 }}>{icon}</div>
+            <div style={{ color:T.muted, fontSize:10, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>{label}</div>
+            <div style={{ color, fontSize:22, fontWeight:900, marginTop:4 }}>{value}</div>
+          </div>
+        ))}
       </div>
 
+      {/* ── EQUITY CURVE + SESSION EDGE ── */}
       <div className="pp-grid pp-grid-2x">
-        <div className="pp-panel" style={{ padding: 20 }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 14 }}>
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
             <div>
-              <div style={{ fontWeight:800, fontSize:16 }}>Live Equity Curve</div>
-              <div style={{ color:T.sub, fontSize:12, marginTop:4 }}>Realtime snapshots from `equity_snapshots`</div>
+              <div className="pp-section-title">Equity Curve</div>
+              <div className="pp-section-sub">Live snapshots from paper account</div>
             </div>
             <SyncPill syncState={data.syncState} rtStatus={data.rtStatus} lastLoadAt={data.lastLoadAt}/>
           </div>
-          <MiniLineChart points={equityPoints} color={(equityPoints[equityPoints.length - 1]?.value || 0) >= (equityPoints[0]?.value || 0) ? T.green : T.red} label="Equity snapshots appear after the first paper updates"/>
+          {equityPoints.length >= 2
+            ? <MiniLineChart points={equityPoints} color={equityColor} label=""/>
+            : (
+              <div style={{ height:140, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:10, color:T.muted, fontSize:13 }}>
+                <div style={{ fontSize:32 }}>📈</div>
+                <div>Curve fills after first equity snapshot</div>
+                <div style={{ fontSize:11, color:T.muted }}>Run update-paper-positions to start tracking</div>
+              </div>
+            )
+          }
         </div>
 
-        <div className="pp-panel" style={{ padding: 20 }}>
-          <div style={{ fontWeight:800, fontSize:16, marginBottom: 14 }}>Session Edge Snapshot</div>
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div className="pp-section-title" style={{ marginBottom:14 }}>Session Edge</div>
           <div className="pp-grid" style={{ gap:10 }}>
             {sessionRows.length ? sessionRows.map(row => (
               <div key={row.name}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                  <span style={{ color:T.sub, fontSize:12 }}>{row.name}</span>
-                  <span style={{ color: row.wr >= 50 ? T.green : T.red, fontSize:12, fontWeight:800 }}>{row.wr.toFixed(0)}%</span>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
+                  <span style={{ color:T.sub, fontSize:13 }}>{row.name}</span>
+                  <span style={{ color: row.wr >= 50 ? T.green : T.red, fontSize:13, fontWeight:800 }}>{row.wr.toFixed(0)}% <span style={{ color:T.muted, fontWeight:400 }}>({row.total})</span></span>
                 </div>
-                <div style={{ height:6, background:'rgba(255,255,255,0.06)', borderRadius:999, overflow:'hidden' }}>
-                  <div style={{ width:`${row.wr}%`, height:'100%', background: row.wr >= 50 ? T.green : T.red, borderRadius:999 }}/>
+                <div style={{ height:6, background:'rgba(255,255,255,0.07)', borderRadius:999, overflow:'hidden' }}>
+                  <div style={{ width:`${row.wr}%`, height:'100%', background: row.wr >= 50 ? T.green : T.red, borderRadius:999, transition:'width 0.8s ease' }}/>
                 </div>
               </div>
-            )) : <div style={{ color:T.muted, fontSize:13 }}>Waiting for resolved signal outcomes</div>}
+            )) : (
+              <div style={{ color:T.muted, fontSize:13, textAlign:'center', padding:'20px 0' }}>
+                <div style={{ fontSize:28, marginBottom:8 }}>🎯</div>
+                Waiting for resolved outcomes.<br/>
+                <span style={{ fontSize:11 }}>update-outcomes runs every hour automatically.</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
+      {/* ── ACTIVE SIGNALS (with confidence ring + TP/SL bar) ── */}
       <div className="pp-grid pp-grid-2x">
-        <div className="pp-panel" style={{ padding: 20 }}>
-          <div style={{ fontWeight:800, fontSize:16, marginBottom: 14 }}>Active Signals</div>
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+            <div className="pp-section-title">Active Signals</div>
+            {activeSignals.length > 0 && (
+              <span style={{ background:'rgba(59,130,246,0.15)', color:'#93C5FD', border:'1px solid rgba(59,130,246,0.3)', borderRadius:20, padding:'3px 10px', fontSize:11, fontWeight:800 }}>
+                {activeSignals.length} LIVE
+              </span>
+            )}
+          </div>
           <div className="pp-grid" style={{ gap:10 }}>
             {activeSignals.length ? activeSignals.map(signal => {
               const meta = SIGNAL_STATE_META[signal.signal_state] || SIGNAL_STATE_META.NO_TRADE;
+              const conf = safeNum(signal.confidence, 0);
               return (
-                <div key={signal.id} className="pp-panel-solid" style={{ padding: 14 }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'center' }}>
-                    <div>
-                      <div style={{ color:T.text, fontSize:14, fontWeight:800 }}>{signal.symbol}</div>
-                      <div style={{ color:T.sub, fontSize:12, marginTop:4 }}>{sessionLabel(signal.session_name)} · {signal.timeframe}</div>
+                <div key={signal.id} className="pp-panel-solid pp-signal-card" style={{ padding:14 }}>
+                  <div style={{ display:'flex', gap:12, alignItems:'flex-start' }}>
+                    <ConfRing score={conf}/>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+                        <div style={{ fontWeight:900, fontSize:15 }}>{signal.symbol}</div>
+                        <div style={{ color:meta.color, fontSize:11, fontWeight:900, background:`${meta.color}15`, border:`1px solid ${meta.color}30`, borderRadius:6, padding:'2px 8px' }}>{meta.label}</div>
+                      </div>
+                      <div style={{ color:T.muted, fontSize:11, marginTop:3 }}>{sessionLabel(signal.session_name)} · {signal.timeframe || '15m'} · {timeAgo(signal.created_at)}</div>
+                      <div style={{ display:'flex', gap:14, marginTop:8, flexWrap:'wrap', fontSize:12 }}>
+                        {signal.price && <span style={{ color:T.sub }}>Entry <strong style={{ color:T.text }}>{fmtPrice(signal.symbol, signal.price)}</strong></span>}
+                        {signal.tp1   && <span style={{ color:T.sub }}>TP1 <strong style={{ color:'#34D399' }}>{fmtPrice(signal.symbol, signal.tp1)}</strong></span>}
+                        {signal.tp2   && <span style={{ color:T.sub }}>TP2 <strong style={{ color:T.green }}>{fmtPrice(signal.symbol, signal.tp2)}</strong></span>}
+                        {signal.sl    && <span style={{ color:T.sub }}>SL <strong style={{ color:T.red }}>{fmtPrice(signal.symbol, signal.sl)}</strong></span>}
+                      </div>
+                      <TpSlBar entry={signal.price} tp1={signal.tp1} tp2={signal.tp2} sl={signal.sl} direction={signal.direction}/>
                     </div>
-                    <div style={{ color:meta.color, fontSize:12, fontWeight:900 }}>{meta.label}</div>
-                  </div>
-                  <div style={{ display:'flex', gap:14, marginTop:10, flexWrap:'wrap', fontSize:12 }}>
-                    <span style={{ color:T.sub }}>Conf <strong style={{ color:T.text }}>{safeNum(signal.confidence, 0)}%</strong></span>
-                    <span style={{ color:T.sub }}>Entry <strong style={{ color:T.text }}>{signal.price ? fmtPrice(signal.symbol, signal.price) : '—'}</strong></span>
-                    <span style={{ color:T.sub }}>TP2 <strong style={{ color:T.green }}>{signal.tp2 ? fmtPrice(signal.symbol, signal.tp2) : '—'}</strong></span>
                   </div>
                 </div>
               );
-            }) : <div style={{ color:T.muted, fontSize:13 }}>No actionable live signals right now.</div>}
+            }) : (
+              <div style={{ padding:'28px 20px', textAlign:'center', color:T.muted }}>
+                <div style={{ fontSize:36, marginBottom:10 }}>⚡</div>
+                <div style={{ fontSize:14, fontWeight:700, color:T.sub, marginBottom:6 }}>No actionable signals</div>
+                <div style={{ fontSize:12, lineHeight:1.6 }}>Click <strong style={{ color:T.indigo }}>Analyze Now</strong> above to scan<br/>XAU/USD, EUR/USD, GBP/USD, NAS100…</div>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="pp-panel" style={{ padding: 20 }}>
-          <div style={{ fontWeight:800, fontSize:16, marginBottom: 14 }}>Paper Positions</div>
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div className="pp-section-title" style={{ marginBottom:14 }}>Paper Positions</div>
           <div className="pp-grid" style={{ gap:10 }}>
-            {openPositions.length ? openPositions.slice(0, 5).map(pos => (
-              <div key={pos.id} className="pp-panel-solid" style={{ padding: 14 }}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12 }}>
-                  <div>
-                    <div style={{ color:T.text, fontWeight:800 }}>{pos.symbol}</div>
-                    <div style={{ color:T.sub, fontSize:12, marginTop:4 }}>{pos.direction} · {pos.status}</div>
+            {openPositions.length ? openPositions.slice(0, 5).map(pos => {
+              const pnl = safeNum(pos.pnl_usd, 0) || safeNum(pos.partial_pnl_usd, 0) || 0;
+              const pnlR = safeNum(pos.pnl_r, 0) || safeNum(pos.partial_pnl_r, 0) || 0;
+              return (
+                <div key={pos.id} className="pp-panel-solid pp-signal-card" style={{ padding:14 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12 }}>
+                    <div>
+                      <div style={{ fontWeight:900, fontSize:15 }}>{pos.symbol}</div>
+                      <div style={{ color: pos.direction === 'LONG' ? T.green : T.red, fontSize:11, fontWeight:800, marginTop:3 }}>{pos.direction} · {pos.status}</div>
+                    </div>
+                    <div style={{ textAlign:'right' }}>
+                      <div style={{ color: pnl >= 0 ? T.green : T.red, fontWeight:900, fontSize:16 }}>{fmtUsd(pnl)}</div>
+                      <div style={{ color: pnlR >= 0 ? T.green : T.red, fontSize:12, fontWeight:700 }}>{fmtR(pnlR)}</div>
+                    </div>
                   </div>
-                  <div style={{ color:safeNum(pos.pnl_usd, 0) >= 0 ? T.green : T.red, fontWeight:900 }}>{fmtUsd(pos.pnl_usd || pos.partial_pnl_usd || 0)}</div>
+                  <div style={{ display:'flex', gap:14, marginTop:10, fontSize:12, flexWrap:'wrap' }}>
+                    <span style={{ color:T.sub }}>Entry <strong style={{ color:T.text }}>{pos.entry_price ? Number(pos.entry_price).toFixed(2) : '—'}</strong></span>
+                    <span style={{ color:T.sub }}>Risk <strong style={{ color:T.text }}>{fmtUsd(pos.risk_usd || 0)}</strong></span>
+                    <span style={{ color:T.sub }}>Opened <strong style={{ color:T.text }}>{timeAgo(pos.opened_at)}</strong></span>
+                  </div>
+                  <TpSlBar entry={safeNum(pos.entry_price)} tp1={safeNum(pos.tp1)} tp2={safeNum(pos.tp2)} sl={safeNum(pos.sl)} direction={pos.direction}/>
                 </div>
-                <div style={{ display:'flex', gap:14, marginTop:10, fontSize:12, flexWrap:'wrap' }}>
-                  <span style={{ color:T.sub }}>Entry <strong style={{ color:T.text }}>{safeNum(pos.entry_price) != null ? Number(pos.entry_price).toFixed(2) : '—'}</strong></span>
-                  <span style={{ color:T.sub }}>Risk <strong style={{ color:T.text }}>{fmtUsd(pos.risk_usd || 0)}</strong></span>
-                  <span style={{ color:T.sub }}>R <strong style={{ color:safeNum(pos.pnl_r, 0) >= 0 ? T.green : T.red }}>{fmtR(pos.pnl_r || pos.partial_pnl_r || 0)}</strong></span>
-                </div>
+              );
+            }) : (
+              <div style={{ padding:'28px 20px', textAlign:'center', color:T.muted }}>
+                <div style={{ fontSize:36, marginBottom:10 }}>📋</div>
+                <div style={{ fontSize:14, fontWeight:700, color:T.sub, marginBottom:6 }}>No open positions</div>
+                <div style={{ fontSize:12, lineHeight:1.6 }}>Paper trades open automatically<br/>when auto-analyze fires LONG_NOW / SHORT_NOW</div>
               </div>
-            )) : <div style={{ color:T.muted, fontSize:13 }}>No open paper positions.</div>}
+            )}
           </div>
         </div>
       </div>
@@ -3389,33 +3743,63 @@ function SettingsWorkbench({ data, accountView, onUpdateAccount }) {
   );
 }
 
-function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup }) {
+function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup, gateData }) {
   const titles = {
-    dashboard: ['Dashboard', 'Live operator overview, equity and session context'],
-    signals: ['Signals', 'Embedded SmartChart, Signal Engine and drawing rules'],
-    analytics: ['Analytics', 'Phase 1 outcome tracking with real data'],
-    challenge: ['Challenge', 'Prop rules, buffers and mode controls'],
-    settings: ['Settings', 'Account sync, risk profile and notification preferences'],
+    dashboard: ['Dashboard', 'Live operator overview'],
+    signals:   ['Signals',   'SmartChart + Signal Engine'],
+    analytics: ['Analytics', 'Outcome tracking'],
+    challenge: ['Challenge', 'Prop rules & buffers'],
+    settings:  ['Settings',  'Account & risk profile'],
   };
-  const [title, sub] = titles[screen] || titles.dashboard;
+  const [title] = titles[screen] || titles.dashboard;
+
+  // Phase 1 gate metrics
+  const totalTrades = gateData?.totalTrades || 0;
+  const pf          = gateData?.profitFactor || 0;
+  const maxDD       = gateData?.maxDD || 0;
+  const tradesPct   = Math.min(100, (totalTrades / 100) * 100);
+  const pfOk   = pf >= 1.2;
+  const ddOk   = maxDD <= 15;
+  const allMet = totalTrades >= 100 && pfOk && ddOk;
+
   return (
     <div className="pp-topbar">
       <div className="pp-topbar-inner">
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <div className="pp-brand-mark">P</div>
           <div>
-            <div style={{ fontWeight:900, fontSize:18, letterSpacing:'-.03em' }}>PropPilot <span style={{ color:T.indigo }}>AI</span></div>
-            <div style={{ color:T.sub, fontSize:12 }}>{title} · {sub}</div>
+            <div style={{ fontWeight:900, fontSize:16, letterSpacing:'-.03em' }}>PropPilot <span style={{ color:T.indigo }}>AI</span></div>
+            <div style={{ color:T.sub, fontSize:11 }}>{title}</div>
           </div>
         </div>
-        <div className="pp-topbar-right" style={{ display:'flex', alignItems:'center', gap:10, marginLeft:'auto' }}>
+
+        {/* Phase Gate — always visible */}
+        <div style={{ display:'flex', alignItems:'center', gap:14, padding:'6px 16px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10, backdropFilter:'blur(12px)' }}>
+          <span style={{ fontSize:10, fontWeight:800, color:T.muted, letterSpacing:'.06em' }}>PHASE 1 GATE</span>
+          {[
+            { label:`${totalTrades}/100`, pct:tradesPct, ok: totalTrades>=100 },
+            { label:`PF ${pf.toFixed(2)}`, pct:Math.min(100,(pf/1.2)*100), ok:pfOk },
+            { label:`DD ${maxDD.toFixed(1)}%`, pct:Math.min(100,((15-maxDD)/15)*100), ok:ddOk },
+          ].map(({ label, pct, ok }) => (
+            <div key={label} className="pp-gate-item">
+              <div className="pp-gate-bar-track">
+                <div className="pp-gate-bar-fill" style={{ width:`${pct}%`, background: ok ? '#10B981' : '#F59E0B' }}/>
+              </div>
+              <span style={{ fontSize:10, color: ok ? '#10B981' : T.sub, fontWeight:700 }}>{label}</span>
+              {ok && <span style={{ color:'#10B981', fontSize:12 }}>✓</span>}
+            </div>
+          ))}
+          {allMet && <span style={{ fontSize:11, color:'#10B981', fontWeight:900 }}>🔓 UNLOCKED</span>}
+        </div>
+
+        <div className="pp-topbar-right" style={{ display:'flex', alignItems:'center', gap:8, marginLeft:'auto' }}>
           <SyncPill syncState={syncState} rtStatus={rtStatus} lastLoadAt={lastLoadAt}/>
-          <div className="pp-status-pill" style={{ gap:10 }}>
+          <div className="pp-status-pill">
             <span style={{ color:T.text }}>{accountView.firm}</span>
             <span style={{ color:T.indigo }}>{fmtUsd(accountView.size || 100000)}</span>
             <span style={{ color:T.muted }}>{phase.toUpperCase()}</span>
           </div>
-          <button className="pp-btn" onClick={() => onRefresh('updating')}>Refresh</button>
+          <button className="pp-btn" onClick={() => onRefresh('updating')}>↻</button>
           <button className="pp-btn pp-btn-primary" onClick={onSetup}>Account</button>
         </div>
       </div>
@@ -3479,6 +3863,21 @@ function PropPilotAI() {
     return account;
   }, [account, screen]);
 
+  // Build gateData for header phase bar
+  const gateData = useMemo(() => {
+    const sigs = appData.signals || [];
+    const resolved = sigs.filter(s => s.outcome !== 'OPEN');
+    const wins  = resolved.filter(s => ['TP1_HIT','TP2_HIT'].includes(s.outcome));
+    const losses= resolved.filter(s => s.outcome === 'SL_HIT');
+    const totalR= resolved.reduce((sum, s) => sum + (safeNum(s.pnl_r, 0) || 0), 0);
+    const grossW= wins.reduce((s, x) => s + Math.abs(safeNum(x.pnl_r,1)||1), 0);
+    const grossL= losses.reduce((s, x) => s + Math.abs(safeNum(x.pnl_r,1)||1), 0);
+    const pf = grossL > 0 ? grossW / grossL : (grossW > 0 ? 9.99 : 0);
+    const acc = appData.account || {};
+    const maxDD = Math.abs(Math.min(0, safeNum(acc.max_drawdown, 0) || 0));
+    return { totalTrades: resolved.length, profitFactor: pf, maxDD };
+  }, [appData.signals, appData.account]);
+
   return (
     <div className="pp-app-shell">
       {showSetup && <SetupModal account={account} setAccount={handleSetAccount} onClose={() => setShowSetup(false)}/>}
@@ -3491,6 +3890,7 @@ function PropPilotAI() {
         lastLoadAt={appData.lastLoadAt}
         onRefresh={appData.refresh}
         onSetup={() => setShowSetup(true)}
+        gateData={gateData}
       />
 
       <div className="pp-content">
@@ -3535,7 +3935,9 @@ function PropPilotAI() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<PropPilotAI/>);
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <ToastProvider><PropPilotAI/></ToastProvider>
+);
 </script>
 </body>
 </html>

@@ -93,6 +93,15 @@
       border-radius: var(--pp-radius) var(--pp-radius) 0 0;
     }
 
+    /* Dot grid */
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
     /* Topbar glass */
     .an-topbar {
       position: sticky; top: 0; z-index: 80;
@@ -101,6 +110,10 @@
       -webkit-backdrop-filter: var(--glass-blur);
       border-bottom: 1px solid var(--glass-border);
     }
+
+    /* Section labels */
+    .an-section-label { font-size:11px; font-weight:800; letter-spacing:0.08em; color:#4B5A72; text-transform:uppercase; margin-bottom:10px; }
+    .an-section-title { font-size:18px; font-weight:800; margin-bottom:4px; }
 
     @media (max-width: 860px) {
       .grid-4 { grid-template-columns: 1fr 1fr !important; }
@@ -635,11 +648,17 @@ function Analytics() {
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <SyncPill rtStatus={rtStatus} loadState={loadState} lastUpdate={lastUpdate}/>
-            <button onClick={load} style={{ padding: '5px 12px', border: `1px solid ${C.border}`, borderRadius: 7, background: 'transparent', color: C.sub, fontSize: 12, cursor: 'pointer' }}>
+            <button onClick={load} style={{ padding: '6px 14px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, background: 'rgba(255,255,255,0.05)', color: C.sub, fontSize: 12, cursor: 'pointer', backdropFilter:'blur(12px)' }}>
               ↻ Refresh
             </button>
-            <a href="signal.html" style={{ color: C.amber, fontSize: 13, fontWeight: 700, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.amber}30`, borderRadius: 7 }}>⚡ Signal Engine</a>
-            <a href="index.html"  style={{ color: C.muted, fontSize: 13, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.border}`, borderRadius: 7 }}>← PropPilot OS</a>
+            {[
+              { href:'index.html',   label:'📊 Dashboard' },
+              { href:'signal.html',  label:'⚡ Signals'   },
+              { href:'roadmap.html', label:'🗺 Roadmap'   },
+              { href:'bot.html',     label:'🤖 Bot'       },
+            ].map(({ href, label }) => (
+              <a key={href} href={href} style={{ color: C.sub, fontSize: 12, fontWeight: 700, textDecoration: 'none', padding: '6px 12px', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, background:'rgba(255,255,255,0.04)', backdropFilter:'blur(12px)', whiteSpace:'nowrap' }}>{label}</a>
+            ))}
           </div>
         </div>
       </div>

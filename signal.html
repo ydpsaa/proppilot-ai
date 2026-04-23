@@ -38,6 +38,15 @@
     .anim  { animation: slideIn 0.5s ease forwards; }
     .pulse { animation: pulse 1.8s ease-in-out infinite; }
 
+    /* Dot grid */
+    body::after {
+      content: '';
+      position: fixed; inset: 0;
+      pointer-events: none; z-index: 0;
+      background-image: radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1px);
+      background-size: 28px 28px;
+    }
+
     /* Ambient orbs */
     #root::before, #root::after {
       content: '';
@@ -1003,11 +1012,18 @@ function SignalEngine() {
               <span style={{ fontWeight:900,fontSize:16,letterSpacing:'-0.03em' }}>PropPilot <span style={{color:'#3B82F6'}}>AI</span></span>
               <span style={{ color:C.muted,fontSize:12,marginLeft:4 }}>/ Signal Engine</span>
             </div>
-            <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
               <div style={{ display:'flex',gap:5,alignItems:'center',padding:'4px 10px',background:'rgba(52,211,153,0.09)',border:'1px solid rgba(52,211,153,0.22)',borderRadius:7,fontSize:11,fontWeight:700,color:C.green }}>
                 <div style={{ width:6,height:6,borderRadius:3,background:C.green,boxShadow:`0 0 6px ${C.green}` }}/>LIVE
               </div>
-              <a href="index.html" style={{ color:C.muted,fontSize:13,textDecoration:'none',padding:'5px 12px',border:`1px solid ${C.border}`,borderRadius:7 }}>← PropPilot OS</a>
+              {[
+                { href:'index.html',     label:'📊 Dashboard'  },
+                { href:'analytics.html', label:'📈 Analytics'  },
+                { href:'roadmap.html',   label:'🗺 Roadmap'    },
+                { href:'bot.html',       label:'🤖 Bot'        },
+              ].map(({ href, label }) => (
+                <a key={href} href={href} style={{ color:C.sub, fontSize:12, fontWeight:700, textDecoration:'none', padding:'6px 12px', border:'1px solid rgba(255,255,255,0.08)', borderRadius:8, background:'rgba(255,255,255,0.04)', backdropFilter:'blur(12px)', whiteSpace:'nowrap' }}>{label}</a>
+              ))}
             </div>
           </div>
         </div>
