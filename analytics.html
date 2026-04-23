@@ -13,13 +13,95 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.2/dist/umd/supabase.min.js"></script>
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
+    :root {
+      --pp-bg: #05070f;
+      --glass-bg: rgba(255,255,255,0.04);
+      --glass-bg-solid: rgba(8,12,24,0.88);
+      --glass-border: rgba(255,255,255,0.1);
+      --glass-highlight: inset 0 1px 0 rgba(255,255,255,0.1);
+      --glass-blur: blur(24px);
+      --pp-blue: #3B82F6;
+      --pp-teal: #14B8A6;
+      --pp-green: #10B981;
+      --pp-red: #EF4444;
+      --pp-amber: #F59E0B;
+      --pp-purple: #A78BFA;
+      --pp-text: #F1F5F9;
+      --pp-sub: #94A3B8;
+      --pp-muted: #4B5A72;
+      --pp-radius: 16px;
+      --pp-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { min-height: 100%; }
-    body { background: #0B0F19; color: #F8FAFC; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    body {
+      background: var(--pp-bg);
+      color: var(--pp-text);
+      font-family: 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 10% 0%, rgba(59,130,246,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 90% 80%, rgba(167,139,250,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse 50% 60% at 50% 50%, rgba(20,184,166,0.04) 0%, transparent 70%);
+      background-attachment: fixed;
+    }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
     @keyframes spin   { to { transform: rotate(360deg); } }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pp-float { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-8px) scale(1.02); } }
     .fade-in { animation: fadeIn 0.5s ease forwards; }
+
+    /* Ambient orbs behind content */
+    #root::before, #root::after {
+      content: '';
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(80px);
+    }
+    #root::before {
+      width: 600px; height: 600px;
+      top: -200px; left: -200px;
+      background: radial-gradient(circle, rgba(59,130,246,0.1), transparent 70%);
+      animation: pp-float 12s ease-in-out infinite;
+    }
+    #root::after {
+      width: 500px; height: 500px;
+      bottom: -150px; right: -150px;
+      background: radial-gradient(circle, rgba(167,139,250,0.08), transparent 70%);
+      animation: pp-float 16s ease-in-out infinite reverse;
+    }
+
+    /* Glass panel */
+    .glass-panel {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--pp-radius);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      box-shadow: var(--pp-shadow), var(--glass-highlight);
+      position: relative;
+    }
+    .glass-panel::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+      border-radius: var(--pp-radius) var(--pp-radius) 0 0;
+    }
+
+    /* Topbar glass */
+    .an-topbar {
+      position: sticky; top: 0; z-index: 80;
+      background: rgba(5,7,15,0.75);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border-bottom: 1px solid var(--glass-border);
+    }
+
     @media (max-width: 860px) {
       .grid-4 { grid-template-columns: 1fr 1fr !important; }
       .grid-3 { grid-template-columns: 1fr !important; }
@@ -44,12 +126,13 @@ const sbClient = (() => {
 const C = {
   amber:'#F59E0B', green:'#10B981', red:'#EF4444', yellow:'#F59E0B',
   indigo:'#3B82F6', teal:'#14B8A6', purple:'#8B5CF6',
-  bg:'#0B0F19', text:'#F8FAFC', sub:'#94A3B8', muted:'#64748B',
-  border:'rgba(148,163,184,0.14)', surf:'rgba(21,26,37,0.82)',
+  bg:'#05070f', text:'#F1F5F9', sub:'#94A3B8', muted:'#4B5A72',
+  border:'rgba(255,255,255,0.1)', surf:'rgba(255,255,255,0.045)',
 };
 
-const card  = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24, backdropFilter:'blur(18px)' };
-const cardS = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16, backdropFilter:'blur(18px)' };
+const GLASS = { background:'rgba(255,255,255,0.045)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:16, backdropFilter:'blur(24px)', WebkitBackdropFilter:'blur(24px)', boxShadow:'0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)' };
+const card  = { ...GLASS, padding: 24 };
+const cardS = { ...GLASS, padding: 16 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const pct  = (v) => `${(v * 100).toFixed(1)}%`;
@@ -540,10 +623,10 @@ function Analytics() {
   const hasData = signals.length > 0;
 
   return (
-    <div style={{ minHeight: '100vh', background: C.bg, color: C.text }}>
+    <div style={{ minHeight: '100vh', color: C.text, position: 'relative', zIndex: 1 }}>
 
       {/* ── NAV ── */}
-      <div style={{ borderBottom: `1px solid ${C.border}`, background: 'rgba(11,15,25,0.86)', padding: '0 32px', position: 'sticky', top: 0, zIndex: 100, backdropFilter:'blur(18px)' }}>
+      <div className="an-topbar" style={{ padding: '0 32px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 58 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg,${C.indigo},#14B8A6)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 900 }}>P</div>
@@ -629,7 +712,7 @@ function Analytics() {
             <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
               {[['overview','📊 Overview'],['pillars','📐 Analytical Pillars'],['setups','🔬 Setups Table'],['heatmap','🕐 Hourly Heatmap']].map(([id, label]) => (
                 <button key={id} onClick={() => setActiveTab(id)}
-                  style={{ padding: '8px 18px', borderRadius: 9, border: `1px solid ${activeTab===id?C.amber:C.border}`, background: activeTab===id?`${C.amber}12`:'transparent', color: activeTab===id?C.amber:C.sub, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                  style={{ padding: '8px 18px', borderRadius: 10, border: `1px solid ${activeTab===id?C.amber:'rgba(255,255,255,0.1)'}`, background: activeTab===id?`rgba(245,158,11,0.12)`:'rgba(255,255,255,0.04)', color: activeTab===id?C.amber:C.sub, fontWeight: 700, fontSize: 13, cursor: 'pointer', backdropFilter:'blur(12px)', boxShadow: activeTab===id?`0 0 16px rgba(245,158,11,0.15)`:'none' }}>
                   {label}
                 </button>
               ))}

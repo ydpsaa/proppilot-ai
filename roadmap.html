@@ -12,11 +12,24 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { min-height: 100%; }
-    body { background: #060710; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    body {
+      background: #05070f;
+      color: #F1F5F9;
+      font-family: 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 10% 0%, rgba(59,130,246,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 90% 80%, rgba(167,139,250,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse 50% 60% at 50% 50%, rgba(20,184,166,0.04) 0%, transparent 70%);
+      background-attachment: fixed;
+    }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
     @keyframes spin   { to { transform: rotate(360deg); } }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes pulse  { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+    @keyframes pp-float { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-8px) scale(1.02); } }
     .fade-in { animation: fadeIn 0.5s ease forwards; }
     .pulse   { animation: pulse 2s ease-in-out infinite; }
   </style>
@@ -38,8 +51,9 @@ const C = {
   border:'rgba(255,255,255,0.07)', surf:'rgba(255,255,255,0.04)',
 };
 
-const card  = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 };
-const cardS = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 };
+const GLASS = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)', backdropFilter:'blur(24px)', WebkitBackdropFilter:'blur(24px)', boxShadow:'0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)' };
+const card  = { ...GLASS, borderRadius: 16, padding: 24 };
+const cardS = { ...GLASS, borderRadius: 12, padding: 16 };
 
 // ── Progress Ring ─────────────────────────────────────────────────────────────
 function Ring({ pct: p = 0, size = 72, stroke = 6, color = C.amber, label, sub }) {

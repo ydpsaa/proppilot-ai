@@ -16,62 +16,196 @@
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     :root {
-      --pp-bg: #0B0F19;
-      --pp-bg-soft: #101624;
-      --pp-panel: rgba(21, 26, 37, 0.82);
-      --pp-panel-solid: #151A25;
-      --pp-panel-2: #1B2230;
+      --pp-bg: #05070f;
+      --pp-bg-soft: #080c18;
+      --pp-panel: rgba(255,255,255,0.045);
+      --pp-panel-solid: rgba(12,16,28,0.92);
+      --pp-panel-2: rgba(255,255,255,0.06);
       --pp-blue: #3B82F6;
+      --pp-teal: #14B8A6;
       --pp-green: #10B981;
       --pp-red: #EF4444;
       --pp-amber: #F59E0B;
-      --pp-text: #F8FAFC;
+      --pp-purple: #A78BFA;
+      --pp-text: #F1F5F9;
       --pp-sub: #94A3B8;
-      --pp-muted: #64748B;
-      --pp-border: rgba(148, 163, 184, 0.14);
-      --pp-border-strong: rgba(148, 163, 184, 0.24);
-      --pp-radius: 8px;
-      --pp-shadow: 0 20px 60px rgba(0,0,0,0.35);
+      --pp-muted: #4B5A72;
+      --pp-border: rgba(255,255,255,0.08);
+      --pp-border-strong: rgba(255,255,255,0.14);
+      --pp-radius: 16px;
+      --pp-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+      --pp-glow-blue: 0 0 40px rgba(59,130,246,0.15);
+      --pp-glow-teal: 0 0 40px rgba(20,184,166,0.12);
+      --glass-bg: rgba(255,255,255,0.04);
+      --glass-border: rgba(255,255,255,0.1);
+      --glass-highlight: inset 0 1px 0 rgba(255,255,255,0.1);
+      --glass-blur: blur(24px);
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
-    body { background: var(--pp-bg); color: var(--pp-text); font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
-    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    body {
+      background: var(--pp-bg);
+      color: var(--pp-text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 10% 0%, rgba(59,130,246,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 90% 80%, rgba(167,139,250,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse 50% 60% at 50% 50%, rgba(20,184,166,0.04) 0%, transparent 70%);
+      background-attachment: fixed;
+    }
+    ::-webkit-scrollbar { width: 5px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
     button { font-family: inherit; }
     #root { min-height: 100vh; }
     @keyframes pp-spin { to { transform: rotate(360deg); } }
     @keyframes pp-shimmer { 100% { transform: translateX(100%); } }
-    @keyframes pp-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    .pp-app-shell { min-height: 100vh; padding-bottom: 86px; background:
-      radial-gradient(circle at 20% -10%, rgba(59,130,246,.16), transparent 32%),
-      linear-gradient(180deg, #0B0F19 0%, #080B12 100%); }
-    .pp-topbar { position: sticky; top: 0; z-index: 80; border-bottom: 1px solid var(--pp-border); background: rgba(11,15,25,.82); backdrop-filter: blur(18px); }
-    .pp-topbar-inner { height: 64px; max-width: 1440px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-    .pp-brand-mark { width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, var(--pp-blue), #14B8A6); display: grid; place-items: center; color: #fff; font-weight: 900; box-shadow: 0 12px 30px rgba(59,130,246,.24); }
-    .pp-status-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--pp-border); background: rgba(21,26,37,.72); color: var(--pp-sub); font-size: 11px; font-weight: 800; white-space: nowrap; }
-    .pp-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pp-muted); box-shadow: 0 0 0 3px rgba(100,116,139,.12); }
-    .pp-status-pill.synced .pp-status-dot { background: var(--pp-green); box-shadow: 0 0 0 3px rgba(16,185,129,.14); }
-    .pp-status-pill.updating .pp-status-dot { background: var(--pp-amber); box-shadow: 0 0 0 3px rgba(245,158,11,.14); }
-    .pp-status-pill.offline .pp-status-dot { background: var(--pp-red); box-shadow: 0 0 0 3px rgba(239,68,68,.14); }
-    .pp-content { max-width: 1440px; margin: 0 auto; padding: 24px; animation: pp-rise .28s ease both; }
-    .pp-bottom-nav { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 100; width: min(680px, calc(100vw - 24px)); min-height: 62px; padding: 7px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; border: 1px solid var(--pp-border-strong); border-radius: 18px; background: rgba(11,15,25,.86); backdrop-filter: blur(20px); box-shadow: var(--pp-shadow); }
-    .pp-nav-item { min-height: 48px; border: 0; border-radius: 12px; color: var(--pp-muted); background: transparent; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transition: background .18s ease, color .18s ease, transform .18s ease; }
-    .pp-nav-item:hover { background: rgba(255,255,255,.04); color: var(--pp-text); transform: translateY(-1px); }
-    .pp-nav-item.active { background: rgba(59,130,246,.14); color: #DBEAFE; box-shadow: inset 0 0 0 1px rgba(59,130,246,.25); }
-    .pp-nav-icon { font-size: 16px; line-height: 1; }
-    .pp-nav-label { font-size: 10px; font-weight: 800; letter-spacing: .01em; }
-    .pp-panel { background: var(--pp-panel); border: 1px solid var(--pp-border); border-radius: var(--pp-radius); box-shadow: 0 18px 44px rgba(0,0,0,.18); backdrop-filter: blur(18px); }
-    .pp-panel-solid { background: var(--pp-panel-solid); border: 1px solid var(--pp-border); border-radius: var(--pp-radius); }
-    .pp-grid { display: grid; gap: 16px; }
+    @keyframes pp-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pp-float { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-8px) scale(1.02); } }
+    @keyframes pp-pulse-glow { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+    /* ── App shell ── */
+    .pp-app-shell {
+      min-height: 100vh;
+      padding-bottom: 90px;
+      position: relative;
+    }
+    /* Ambient orbs */
+    .pp-app-shell::before, .pp-app-shell::after {
+      content: '';
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(80px);
+    }
+    .pp-app-shell::before {
+      width: 600px; height: 600px;
+      top: -200px; left: -200px;
+      background: radial-gradient(circle, rgba(59,130,246,0.1), transparent 70%);
+      animation: pp-float 12s ease-in-out infinite;
+    }
+    .pp-app-shell::after {
+      width: 500px; height: 500px;
+      bottom: -150px; right: -150px;
+      background: radial-gradient(circle, rgba(167,139,250,0.08), transparent 70%);
+      animation: pp-float 16s ease-in-out infinite reverse;
+    }
+
+    /* ── Topbar (glass) ── */
+    .pp-topbar {
+      position: sticky; top: 0; z-index: 80;
+      border-bottom: 1px solid var(--pp-border);
+      background: rgba(5,7,15,0.7);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+    }
+    .pp-topbar-inner { height: 60px; max-width: 1440px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .pp-brand-mark {
+      width: 34px; height: 34px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--pp-blue), var(--pp-teal));
+      display: grid; place-items: center; color: #fff; font-weight: 900; font-size: 15px;
+      box-shadow: 0 0 20px rgba(59,130,246,0.4), var(--glass-highlight);
+    }
+
+    /* ── Status pill ── */
+    .pp-status-pill {
+      display: inline-flex; align-items: center; gap: 7px; min-height: 28px;
+      padding: 4px 12px; border-radius: 999px;
+      border: 1px solid var(--glass-border);
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(12px);
+      color: var(--pp-sub); font-size: 11px; font-weight: 700; white-space: nowrap;
+    }
+    .pp-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pp-muted); }
+    .pp-status-pill.synced .pp-status-dot { background: var(--pp-green); box-shadow: 0 0 8px var(--pp-green); animation: pp-pulse-glow 2s ease-in-out infinite; }
+    .pp-status-pill.updating .pp-status-dot { background: var(--pp-amber); box-shadow: 0 0 8px var(--pp-amber); }
+    .pp-status-pill.offline .pp-status-dot { background: var(--pp-red); }
+
+    /* ── Content ── */
+    .pp-content { max-width: 1440px; margin: 0 auto; padding: 24px; animation: pp-rise .3s ease both; position: relative; z-index: 1; }
+
+    /* ── Bottom nav (glass) ── */
+    .pp-bottom-nav {
+      position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+      z-index: 100; width: min(680px, calc(100vw - 24px));
+      min-height: 64px; padding: 6px;
+      display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px;
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      background: rgba(5,7,15,0.8);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      box-shadow: var(--pp-shadow), var(--glass-highlight);
+    }
+    .pp-nav-item {
+      min-height: 52px; border: 0; border-radius: 14px;
+      color: var(--pp-muted); background: transparent; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+      transition: all .2s ease;
+    }
+    .pp-nav-item:hover { background: rgba(255,255,255,0.06); color: var(--pp-sub); transform: translateY(-1px); }
+    .pp-nav-item.active {
+      background: rgba(59,130,246,0.15);
+      color: #BFDBFE;
+      box-shadow: inset 0 0 0 1px rgba(59,130,246,0.3), 0 0 20px rgba(59,130,246,0.1);
+    }
+    .pp-nav-icon { font-size: 17px; line-height: 1; }
+    .pp-nav-label { font-size: 10px; font-weight: 700; letter-spacing: .02em; }
+
+    /* ── Glass panel (main card) ── */
+    .pp-panel {
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--pp-radius);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3), var(--glass-highlight);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      position: relative;
+      overflow: hidden;
+    }
+    .pp-panel::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+    }
+    .pp-panel-solid {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--pp-radius);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    /* ── Grid ── */
+    .pp-grid { display: grid; gap: 14px; }
     .pp-grid-4x { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .pp-grid-3x { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .pp-grid-2x { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .pp-btn { border: 1px solid var(--pp-border); border-radius: 8px; background: rgba(255,255,255,.04); color: var(--pp-text); min-height: 36px; padding: 8px 12px; font-weight: 800; font-size: 12px; cursor: pointer; transition: transform .16s ease, background .16s ease, border-color .16s ease; }
-    .pp-btn:hover { transform: translateY(-1px); background: rgba(255,255,255,.07); border-color: var(--pp-border-strong); }
-    .pp-btn-primary { background: linear-gradient(135deg, var(--pp-blue), #2563EB); border-color: rgba(59,130,246,.5); color: #fff; }
-    .pp-skeleton { position: relative; overflow: hidden; background: rgba(255,255,255,.05); border-radius: 8px; }
-    .pp-skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent); animation: pp-shimmer 1.4s infinite; }
-    .pp-signal-frame { width: 100%; min-height: calc(100vh - 172px); border: 0; display: block; background: var(--pp-bg); }
+
+    /* ── Button ── */
+    .pp-btn {
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.06);
+      color: var(--pp-text); min-height: 36px; padding: 8px 14px;
+      font-weight: 700; font-size: 12px; cursor: pointer;
+      transition: all .18s ease;
+      backdrop-filter: blur(8px);
+    }
+    .pp-btn:hover { transform: translateY(-1px); background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    .pp-btn-primary {
+      background: linear-gradient(135deg, rgba(59,130,246,0.9), rgba(37,99,235,0.9));
+      border-color: rgba(59,130,246,0.5); color: #fff;
+      box-shadow: 0 0 20px rgba(59,130,246,0.25);
+    }
+    .pp-btn-primary:hover { box-shadow: 0 0 30px rgba(59,130,246,0.4); }
+
+    /* ── Skeleton ── */
+    .pp-skeleton { position: relative; overflow: hidden; background: rgba(255,255,255,0.04); border-radius: 8px; }
+    .pp-skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent); animation: pp-shimmer 1.6s infinite; }
+    .pp-signal-frame { width: 100%; min-height: calc(100vh - 172px); border: 0; display: block; background: transparent; }
 
     /* ── Mobile responsive ── */
     @media (max-width: 768px) {
@@ -356,11 +490,11 @@ const DEFAULT_TRADES = [
 const T = {
   amber:'#F59E0B', indigo:'#3B82F6', green:'#10B981',
   red:'#EF4444',   yellow:'#F59E0B',
-  bg:'#0B0F19', text:'#F8FAFC', sub:'#94A3B8', muted:'#64748B',
-  border:'rgba(148,163,184,0.14)', surf:'rgba(21,26,37,0.82)',
+  bg:'#05070f', text:'#F1F5F9', sub:'#94A3B8', muted:'#4B5A72',
+  border:'rgba(255,255,255,0.1)', surf:'rgba(255,255,255,0.045)',
 };
-const card  = { background:T.surf, border:`1px solid ${T.border}`, borderRadius:8, padding:24, backdropFilter:'blur(18px)' };
-const cardS = { background:T.surf, border:`1px solid ${T.border}`, borderRadius:8, padding:16, backdropFilter:'blur(18px)' };
+const card  = { background:'rgba(255,255,255,0.045)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:16, padding:24, backdropFilter:'blur(24px)', WebkitBackdropFilter:'blur(24px)', boxShadow:'0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)' };
+const cardS = { background:'rgba(255,255,255,0.045)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:16, padding:16, backdropFilter:'blur(24px)', WebkitBackdropFilter:'blur(24px)', boxShadow:'0 8px 32px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)' };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ATOMS
@@ -607,7 +741,7 @@ function SetupModal({ account, setAccount, onClose }) {
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
-      <div className="pp-modal-inner" style={{ ...card, width:500, background:'#0C0E1B', border:'1px solid rgba(245,166,35,0.3)' }} onClick={e => e.stopPropagation()}>
+      <div className="pp-modal-inner" style={{ ...card, width:500, background:'rgba(5,7,15,0.92)', border:'1px solid rgba(245,166,35,0.3)' }} onClick={e => e.stopPropagation()}>
         <div style={{ fontWeight:900, fontSize:18, marginBottom:6 }}>Configure Account</div>
         <div style={{ color:T.muted, fontSize:13, marginBottom:24 }}>Enter your prop firm details. Risk Engine will use these values.</div>
         <div style={{ marginBottom:20 }}>
@@ -683,7 +817,7 @@ function LogTradeModal({ onClose, onSave }) {
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', zIndex:300, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
-      <div className="pp-modal-inner" style={{ ...card, width:480, background:'#0C0E1B', border:'1px solid rgba(52,211,153,0.3)' }} onClick={e => e.stopPropagation()}>
+      <div className="pp-modal-inner" style={{ ...card, width:480, background:'rgba(5,7,15,0.92)', border:'1px solid rgba(52,211,153,0.3)' }} onClick={e => e.stopPropagation()}>
         <div style={{ fontWeight:900, fontSize:18, marginBottom:4 }}>Log Trade</div>
         <div style={{ color:T.muted, fontSize:13, marginBottom:24 }}>Record a completed trade for your journal.</div>
 
