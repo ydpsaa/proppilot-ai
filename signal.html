@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PropPilot — Signal Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <!-- TradingView Lightweight Charts — free open-source charting library -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { min-height: 100%; }
+    body { background: #060710; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    button, input { font-family: inherit; }
+
+    @keyframes pulse  { 0%,100%{opacity:1} 50%{opacity:0.35} }
+    @keyframes spin   { to{transform:rotate(360deg)} }
+    @keyframes slideIn{ from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes glow   { 0%,100%{box-shadow:0 0 0 0 rgba(245,166,35,.4)} 50%{box-shadow:0 0 0 10px rgba(245,166,35,0)} }
+
+    .anim { animation: slideIn 0.5s ease forwards; }
+    .pulse { animation: pulse 1.8s ease-in-out infinite; }
+
+    @media (max-width: 860px) {
+      .grid-2  { grid-template-columns: 1fr !important; }
+      .grid-3  { grid-template-columns: 1fr 1fr !important; }
+      .grid-5  { grid-template-columns: 1fr 1fr !important; }
+      .s-content { padding: 0 16px !important; }
+      .hero-title { font-size: 28px !important; }
+      .signal-num { font-size: 32px !important; }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+const API          = 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1';
+const SB_URL       = 'https://nxiednydxyrtxpkmgtof.supabase.co';
+const SB_KEY       = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
+const SB_HDR       = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' };
+
+async function saveSignalAnalysis(sym, tf, sig) {
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/signal_analyses`, {
+      method: 'POST',
+      headers: { ...SB_HDR, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        symbol:        sym,
+        timeframe:     tf,
+        signal_state:  sig.state,           // actual column: signal_state
+        direction:     sig.dir,
+        confidence:    sig.confidence,
+        price:         sig.price,
+        atr:           sig.ATR,             // actual column: atr
+        rsi:           sig.R,               // actual column: rsi
+        ema20:         sig.E20,
+        ema50:         sig.E50,
+        ema200:        sig.E200,
+        bb_pct_b:      sig.BB?.pctB,        // actual column: bb_pct_b
+        bb_squeeze:    sig.BB?.squeeze,
+        vwap:          sig.VW,
+        swing_high:    sig.swHigh,
+        swing_low:     sig.swLow,
+        bull_score:    sig.bullScore,
+        bear_score:    sig.bearScore,
+        net_score:     sig.netScore,
+        session_name:  sig.session,         // actual column: session_name
+        has_high_news: sig.hasHighNews,
+        has_med_news:  sig.hasMedNews,
+        entry_lo:      sig.levels?.entryLo,
+        entry_hi:      sig.levels?.entryHi,
+        sl:            sig.levels?.sl,      // actual column: sl
+        tp1:           sig.levels?.tp1,     // actual column: tp1
+        tp2:           sig.levels?.tp2,     // actual column: tp2
+        rr_tp1:        sig.levels?.rrTp1,
+        rr_tp2:        sig.levels?.rrTp2,
+        rationale:     sig.rationale,
+        trigger_text:  sig.trigger,
+        invalidation:  sig.invalidation,
+        outcome:       'OPEN',
+        pnl_r:         null,
+      }),
+    });
+    if (!res.ok) { const t = await res.text(); console.warn('signal_analyses insert:', res.status, t); }
+  } catch(e) { console.warn('saveSignalAnalysis failed:', e.message); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// TECHNICAL ANALYSIS ENGINE
+// ══════════════════════════════════════════════════════════════════════════
+
+function emaArr(arr, p) {
+  const k = 2/(p+1);
+  const out = new Array(arr.length);
+  out[0] = arr[0];
+  for (let i=1;i<arr.length;i++) out[i] = arr[i]*k + out[i-1]*(1-k);
+  return out;
+}
+const ema = (arr, p) => { const a = emaArr(arr,p); return a[a.length-1]; };
+
+function rsi(closes, p=14) {
+  if (closes.length < p+2) return 50;
+  let g=0,l=0;
+  for (let i=closes.length-p;i<closes.length;i++) {
+    const d=closes[i]-closes[i-1];
+    if(d>0) g+=d; else l-=d;
+  }
+  if(l===0) return 100;
+  return 100 - 100/(1+g/l*p/(p));
+}
+
+function macd(closes) {
+  if (closes.length < 36) return { val:0,signal:0,hist:0,bullish:false,bearish:false };
+  const e12=emaArr(closes,12), e26=emaArr(closes,26);
+  const ml=e12.map((v,i)=>v-e26[i]);
+  const sl=emaArr(ml,9);
+  const hist=ml.map((v,i)=>v-sl[i]);
+  const n=closes.length-1;
+  return { val:ml[n],signal:sl[n],hist:hist[n],prevHist:hist[n-1]||0,
+    bullish:hist[n]>0&&hist[n]>(hist[n-1]||0),
+    bearish:hist[n]<0&&hist[n]<(hist[n-1]||0) };
+}
+
+function bollinger(closes, p=20) {
+  if (closes.length<p) return {upper:0,middle:0,lower:0,pctB:0.5,squeeze:false,width:0};
+  const sl=closes.slice(-p), sma=sl.reduce((a,b)=>a+b)/p;
+  const std=Math.sqrt(sl.map(v=>(v-sma)**2).reduce((a,b)=>a+b)/p);
+  const up=sma+2*std, lo=sma-2*std, cur=closes[closes.length-1];
+  return { upper:up,middle:sma,lower:lo,
+    pctB: std>0?Math.max(0,Math.min(1,(cur-lo)/(up-lo))):0.5,
+    squeeze: std>0?(up-lo)/sma<0.015:false, width:std>0?(up-lo)/sma:0 };
+}
+
+function atr(candles, p=14) {
+  if (candles.length<p+1) return 0;
+  const trs=candles.slice(1).map((c,i)=>{
+    const prev=candles[i], h=c.h||c.v, l=c.l||c.v;
+    return Math.max(h-l,Math.abs(h-prev.v),Math.abs(l-prev.v));
+  });
+  return trs.slice(-p).reduce((a,b)=>a+b)/p;
+}
+
+function vwap(candles) {
+  if (!candles.length) return 0;
+  let tv=0, tp=0;
+  candles.forEach(c => { const v=c.vol||1,p=(c.h||c.v)/2+(c.l||c.v)/2; tv+=v; tp+=p*v; });
+  return tv>0?tp/tv:candles[candles.length-1].v;
+}
+
+function swingHighLow(closes, lookback=20) {
+  if (closes.length < lookback*2) return { high:Math.max(...closes.slice(-lookback)), low:Math.min(...closes.slice(-lookback)) };
+  const recent = closes.slice(-lookback*2);
+  let high = recent[0], low = recent[0];
+  for (const v of recent) { if(v>high) high=v; if(v<low) low=v; }
+  return { high, low };
+}
+
+// ── Backtest: EMA cross strategy ─────────────────────────────────────────
+function backtest(candles) {
+  if (!candles||candles.length<60) return null;
+  const closes=candles.map(c=>parseFloat(c.v));
+  const n=closes.length;
+  const trades=[];
+  let inTrade=false, entryP=0, entryI=0, peak=0, maxDD=0;
+  for (let i=55;i<n;i++) {
+    const sl=closes.slice(0,i+1), psl=closes.slice(0,i);
+    const e20=ema(sl,20),e50=ema(sl,50),pe20=ema(psl,20),pe50=ema(psl,50);
+    const r=rsi(sl);
+    const crossUp=pe20<=pe50&&e20>e50, crossDn=pe20>=pe50&&e20<e50;
+    if (!inTrade&&crossUp&&r<67) { inTrade=true;entryP=closes[i];entryI=i;peak=entryP; }
+    else if (inTrade&&(crossDn||r>80)) {
+      trades.push({pct:(closes[i]-entryP)/entryP*100,win:closes[i]>entryP,dur:i-entryI});
+      inTrade=false;
+    }
+    if (inTrade){if(closes[i]>peak)peak=closes[i];const dd=peak>0?(peak-closes[i])/peak*100:0;if(dd>maxDD)maxDD=dd;}
+  }
+  if (inTrade) trades.push({pct:(closes[n-1]-entryP)/entryP*100,win:closes[n-1]>entryP,dur:n-1-entryI,open:true});
+  const wins=trades.filter(t=>t.win),losses=trades.filter(t=>!t.win);
+  const wr=trades.length?wins.length/trades.length*100:0;
+  const tot=trades.reduce((a,t)=>a+t.pct,0);
+  const aw=wins.length?wins.reduce((a,t)=>a+t.pct,0)/wins.length:0;
+  const al=losses.length?Math.abs(losses.reduce((a,t)=>a+t.pct,0)/losses.length):0;
+  const pf=al>0?(wr/100*aw)/((1-wr/100)*al):99;
+  let eq=100;const curve=[100];
+  for (const t of trades){eq*=(1+t.pct/100);curve.push(+eq.toFixed(3));}
+  return {trades,wins:wins.length,losses:losses.length,wr,tot,maxDD,aw,al,pf:Math.min(pf,99),curve};
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SIGNAL STATE MACHINE  — the core
+// ══════════════════════════════════════════════════════════════════════════
+//
+// States (not BUY/SELL/HOLD — actionable decisions):
+//   LONG_NOW   — open long immediately, conditions met
+//   SHORT_NOW  — open short immediately, conditions met
+//   WAIT_LONG  — bias bullish, wait for specific trigger
+//   WAIT_SHORT — bias bearish, wait for specific trigger
+//   WAIT_BREAK — ranging, wait for breakout direction
+//   AVOID_NEWS — high-impact event too close
+//   AVOID_CHOP — no structure, chop zone
+
+function buildSignal({ closes, candles, newsEvents = [] }) {
+  const price  = closes[closes.length-1];
+  const R      = rsi(closes);
+  const M      = macd(closes);
+  const E20    = ema(closes, 20);
+  const E50    = ema(closes, 50);
+  const E200   = closes.length >= 200 ? ema(closes, 200) : null;
+  const BB     = bollinger(closes);
+  const ATR    = atr(candles);
+  const VW     = vwap(candles.slice(-24));  // intraday VWAP (24h)
+  const { high: swHigh, low: swLow } = swingHighLow(closes);
+
+  // ── Session ─────────────────────────────────────────────────
+  const h = new Date().getUTCHours();
+  const session = h>=7&&h<12?'London Open':h>=12&&h<16?'NY Open':h>=16&&h<20?'NY Afternoon':h>=2&&h<7?'Pre-London (Asian)':'Off-Hours';
+  const sessionOK = h>=7&&h<20;
+
+  // ── News risk ───────────────────────────────────────────────
+  const now = Date.now();
+  const highNews = (newsEvents||[]).filter(e => e.impact==='HIGH' && Math.abs(new Date(e.date||0).getTime()-now)<4*3600000);
+  const medNews  = (newsEvents||[]).filter(e => (e.impact==='MEDIUM'||e.impact==='MED') && Math.abs(new Date(e.date||0).getTime()-now)<3*3600000);
+  const hasHighNews = highNews.length > 0;
+  const hasMedNews  = medNews.length > 0;
+
+  // ── Trend ───────────────────────────────────────────────────
+  const bullStack  = E20 > E50 && (E200 === null || price > E200);
+  const bearStack  = E20 < E50 && (E200 === null || price < E200);
+  const ranging    = !bullStack && !bearStack;
+  const aboveE20   = price > E20;
+  const aboveE50   = price > E50;
+  const aboveVWAP  = price > VW;
+
+  // ── Momentum ────────────────────────────────────────────────
+  const momentumBull = M.bullish || (M.val > 0 && R < 65 && R > 40);
+  const momentumBear = M.bearish || (M.val < 0 && R > 35 && R < 60);
+  const rsiOversold  = R < 32;
+  const rsiOverbought= R > 68;
+
+  // ── Key zone proximity ──────────────────────────────────────
+  const nearDemand   = BB.pctB < 0.25 || price <= E20 * 1.002;
+  const nearSupply   = BB.pctB > 0.75 || price >= E20 * 0.998;
+  const atExtreme    = BB.pctB < 0.08 || BB.pctB > 0.92;
+
+  // ── Score ───────────────────────────────────────────────────
+  let bullScore=0, bearScore=0;
+  if (bullStack)          bullScore += 30;
+  if (aboveE20)           bullScore += 12;
+  if (aboveVWAP)          bullScore += 8;
+  if (momentumBull)       bullScore += 20;
+  if (rsiOversold)        bullScore += 22;
+  if (BB.pctB < 0.2)      bullScore += 15;
+  if (M.val > 0)          bullScore += 10;
+  if (bearStack)          bearScore += 30;
+  if (!aboveE20)          bearScore += 12;
+  if (!aboveVWAP)         bearScore += 8;
+  if (momentumBear)       bearScore += 20;
+  if (rsiOverbought)      bearScore += 22;
+  if (BB.pctB > 0.8)      bearScore += 15;
+  if (M.val < 0)          bearScore += 10;
+
+  const netScore    = bullScore - bearScore;
+  const confidence  = Math.round(Math.min(93, Math.max(35, 50 + Math.abs(netScore) * 0.45)));
+
+  // ── ATR-based levels ────────────────────────────────────────
+  const fmtP = (v, sym) => {
+    if (!v) return '—';
+    if (v >= 1000) return v.toLocaleString('en-US',{maximumFractionDigits:2});
+    if (v >= 10)   return v.toFixed(4);
+    return v.toFixed(5);
+  };
+  const slMult = 1.4, tp1Mult = 2.2, tp2Mult = 3.6;
+  const entryBuf = ATR * 0.25;
+  const mkLong  = () => ({
+    entryLo: price - entryBuf,
+    entryHi: price + entryBuf,
+    sl:  price - ATR * slMult,
+    tp1: price + ATR * tp1Mult,
+    tp2: price + ATR * tp2Mult,
+    rrTp1: (tp1Mult/slMult).toFixed(1),
+    rrTp2: (tp2Mult/slMult).toFixed(1),
+  });
+  const mkShort = () => ({
+    entryLo: price - entryBuf,
+    entryHi: price + entryBuf,
+    sl:  price + ATR * slMult,
+    tp1: price - ATR * tp1Mult,
+    tp2: price - ATR * tp2Mult,
+    rrTp1: (tp1Mult/slMult).toFixed(1),
+    rrTp2: (tp2Mult/slMult).toFixed(1),
+  });
+
+  // ── State machine ────────────────────────────────────────────
+  let state, dir=null, levels=null, trigger=null, invalidation=null, rationale='';
+
+  if (hasHighNews) {
+    state = 'AVOID_NEWS';
+    rationale = `HIGH-impact event within 4 hours. Spreads widen, stops get hunted, moves are unpredictable. Any open position is exposed to gap risk that no SL can fully protect against. ${highNews.map(n=>n.title||n.event||'Event').slice(0,2).join(', ')}.`;
+    invalidation = 'Wait until 30 min after the event prints and volatility normalizes.';
+  }
+  else if (BB.squeeze && ranging) {
+    state = 'WAIT_BREAK';
+    const breakUp   = price + ATR * 1.5;
+    const breakDown = price - ATR * 1.5;
+    rationale = `Bollinger Band squeeze active — volatility compression before a directional breakout. Market is coiling. EMA20/50 are converging. No directional edge until one side breaks.`;
+    trigger = `BULL: Close above ${fmtP(breakUp)} on this TF. BEAR: Close below ${fmtP(breakDown)}.`;
+    invalidation = 'If neither level is tested within 4 candles, compression continues — reassess.';
+  }
+  else if (ranging && Math.abs(netScore) < 20) {
+    state = 'AVOID_CHOP';
+    rationale = `EMA20 and EMA50 are intertwined, RSI is oscillating around 50 (${R.toFixed(0)}), MACD histogram is flat near zero. This is a chop zone — both longs and shorts will get stopped out repeatedly.`;
+    trigger = `Wait for EMA20 to separate from EMA50 by at least ${fmtP(ATR*0.8)} with RSI making a clear directional move.`;
+    invalidation = 'No setup in ranging markets with compressed EMAs.';
+  }
+  else if (bullScore >= 55 && bullScore > bearScore + 20) {
+    dir = 'LONG';
+    if (nearDemand && momentumBull) {
+      state = 'LONG_NOW';
+      levels = mkLong();
+      rationale = `Price is at a demand zone (BB ${(BB.pctB*100).toFixed(0)}%) with bullish EMA stack ${E20 > E50 ? 'confirmed' : 'forming'}. MACD ${M.bullish ? 'histogram expanding bullish' : `positive at ${M.val.toFixed(5)}`}. RSI at ${R.toFixed(0)} — ${rsiOversold ? 'oversold bounce setup' : 'room to run'}. VWAP ${aboveVWAP ? 'supporting' : 'nearby'}. Intraday institutions ${aboveVWAP ? 'net long' : 'approaching net long'}.`;
+      trigger = `Entry window: ${fmtP(price - entryBuf)} – ${fmtP(price + entryBuf)}. Confirmation: M15 candle closes bullish at zone with volume.`;
+      invalidation = `H1 close below ${fmtP(price - ATR * slMult)} invalidates — structure broken. Watch for CHoCH.`;
+    } else {
+      state = 'WAIT_LONG';
+      const pullbackTo = E20 < price ? E20 : BB.lower;
+      levels = { waitZone: pullbackTo, waitHi: pullbackTo * 1.003, ...mkLong() };
+      rationale = `Bias is bullish — EMA stack ${bullStack ? 'confirmed' : 'forming'}, MACD ${M.val > 0 ? 'positive' : 'turning up'}. BUT price is not at an optimal entry zone yet. BB at ${(BB.pctB*100).toFixed(0)}% — ${BB.pctB > 0.5 ? 'price is extended from mean' : 'approaching demand'}. Wait for a pullback to the ${fmtP(pullbackTo)} area before entering.`;
+      trigger = `Pullback to EMA20 (${fmtP(E20)}) or BB lower band (${fmtP(BB.lower)}). On M15: look for demand absorption candle (long wick down, close bullish) before entering.`;
+      invalidation = `H4 close below ${fmtP(E50)} would shift structure bearish — cancel setup.`;
+    }
+  }
+  else if (bearScore >= 55 && bearScore > bullScore + 20) {
+    dir = 'SHORT';
+    if (nearSupply && momentumBear) {
+      state = 'SHORT_NOW';
+      levels = mkShort();
+      rationale = `Price is at a supply zone (BB ${(BB.pctB*100).toFixed(0)}%) with bearish EMA alignment ${E20 < E50 ? 'confirmed' : 'forming'}. MACD ${M.bearish ? 'histogram expanding bearish' : `negative at ${M.val.toFixed(5)}`}. RSI at ${R.toFixed(0)} — ${rsiOverbought ? 'overbought rejection setup' : 'room to fall'}. Price ${!aboveVWAP ? 'below VWAP — institutions net short' : 'approaching VWAP resistance'}.`;
+      trigger = `Entry window: ${fmtP(price - entryBuf)} – ${fmtP(price + entryBuf)}. Confirmation: M15 bearish rejection candle at zone.`;
+      invalidation = `H1 close above ${fmtP(price + ATR * slMult)} invalidates — distribution failed.`;
+    } else {
+      state = 'WAIT_SHORT';
+      const rallyTo = E20 > price ? E20 : BB.upper;
+      levels = { waitZone: rallyTo, waitLo: rallyTo * 0.997, ...mkShort() };
+      rationale = `Bias is bearish — EMA stack ${bearStack ? 'confirmed' : 'forming'}, MACD ${M.val < 0 ? 'negative' : 'turning down'}. BUT price is not at an optimal short entry yet. Wait for a rally back to the ${fmtP(rallyTo)} area (EMA20 / BB upper) where institutional sellers are likely positioned.`;
+      trigger = `Rally to EMA20 (${fmtP(E20)}) or BB upper band (${fmtP(BB.upper)}). On M15: look for supply absorption (long wick up, close bearish) or CHoCH before entering.`;
+      invalidation = `H4 close above ${fmtP(E50)} would shift structure bullish — cancel setup.`;
+    }
+  }
+  else {
+    state = 'AVOID_CHOP';
+    rationale = `Mixed signals — bull score ${bullScore}, bear score ${bearScore}. No dominant direction. RSI ${R.toFixed(0)}, MACD ${M.val.toFixed(5)}, price ${aboveE20 ? 'above' : 'below'} EMA20. This is a low-probability trading environment.`;
+    trigger = `Wait for either bull or bear score to dominate by 30+ points. Usually requires a clear break above EMA50 (${fmtP(E50)}) or below it.`;
+    invalidation = 'Both long and short setups are invalid in this state.';
+  }
+
+  // ── 3 Scenarios ─────────────────────────────────────────────
+  const scenarios = [
+    {
+      name: 'BULL CASE',
+      color: '#34D399',
+      prob: bullScore > bearScore ? Math.round(30 + bullScore * 0.4) : Math.round(20 + bullScore * 0.25),
+      condition: `Price holds above ${fmtP(E20)} and MACD stays positive`,
+      target: fmtP(price + ATR * 4),
+      icon: '▲',
+      body: `If bulls defend EMA20 (${fmtP(E20)}) and MACD continues expanding, price targets the ${fmtP(swHigh)} area. A break and close above ${fmtP(BB.upper)} would accelerate to ${fmtP(price + ATR * 5.5)}.`,
+    },
+    {
+      name: 'BEAR CASE',
+      color: '#F87171',
+      prob: bearScore > bullScore ? Math.round(30 + bearScore * 0.4) : Math.round(20 + bearScore * 0.25),
+      condition: `Price breaks below ${fmtP(E20)} on H1 close`,
+      target: fmtP(price - ATR * 4),
+      icon: '▼',
+      body: `A confirmed H1 close below EMA20 (${fmtP(E20)}) shifts structure bearish. First target: EMA50 at ${fmtP(E50)}. If that fails, expect drop toward ${fmtP(BB.lower)} and swing low at ${fmtP(swLow)}.`,
+    },
+    {
+      name: 'BASE CASE',
+      color: '#FBBF24',
+      prob: Math.max(0, 100 - Math.round(bullScore*0.3 + bearScore*0.3)),
+      condition: `Price consolidates between ${fmtP(BB.lower)} and ${fmtP(BB.upper)}`,
+      target: `${fmtP(BB.lower)} – ${fmtP(BB.upper)}`,
+      icon: '◆',
+      body: `Most likely scenario ${!sessionOK ? '(off-hours)' : ''}: price oscillates between BB bands (${fmtP(BB.lower)} – ${fmtP(BB.upper)}) while market digests. Watch for a breakout in the next ${BB.squeeze ? '2-4' : '6-12'} candles.`,
+    },
+  ].sort((a,b) => b.prob - a.prob);
+
+  // ── What to watch ────────────────────────────────────────────
+  const watchLevels = [
+    { label:'EMA 20',      price: E20,      note: E20 > price ? 'Overhead resistance' : 'Dynamic support' },
+    { label:'EMA 50',      price: E50,      note: E50 > price ? 'Key resistance'     : 'Key support'      },
+    { label:'BB Upper',    price: BB.upper,  note: 'Supply zone / overbought'                              },
+    { label:'BB Middle',   price: BB.middle, note: 'Mean reversion target'                                 },
+    { label:'BB Lower',    price: BB.lower,  note: 'Demand zone / oversold'                                },
+    { label:'Swing High',  price: swHigh,    note: 'Recent liquidity high'                                  },
+    { label:'Swing Low',   price: swLow,     note: 'Recent liquidity low'                                   },
+    E200 ? { label:'EMA 200', price: E200,  note: price > E200 ? 'LTF support' : 'Major resistance'       } : null,
+  ].filter(Boolean);
+
+  return {
+    state, dir, confidence, levels, trigger, invalidation, rationale,
+    scenarios, watchLevels, session, sessionOK,
+    hasHighNews, hasMedNews, highNews, medNews,
+    R, M, E20, E50, E200, BB, ATR, VW,
+    bullScore, bearScore, netScore, price, swHigh, swLow,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// HELPERS & THEME
+// ══════════════════════════════════════════════════════════════════════════
+
+const C = {
+  amber:'#F5A623', green:'#34D399', red:'#F87171', yellow:'#FBBF24',
+  indigo:'#818CF8', teal:'#2DD4BF',
+  bg:'#060710', text:'#F1F5F9', sub:'#94A3B8', muted:'#475569',
+  border:'rgba(255,255,255,0.07)', surf:'rgba(255,255,255,0.04)',
+};
+
+const STATE_META = {
+  LONG_NOW:    { label:'ENTER LONG',       color:'#34D399', icon:'▲', urgency:'NOW',   bg:'rgba(52,211,153,0.08)' },
+  SHORT_NOW:   { label:'ENTER SHORT',      color:'#F87171', icon:'▼', urgency:'NOW',   bg:'rgba(248,113,113,0.08)' },
+  WAIT_LONG:   { label:'WAIT — LONG BIAS', color:'#F5A623', icon:'⏳', urgency:'WAIT', bg:'rgba(245,166,35,0.06)' },
+  WAIT_SHORT:  { label:'WAIT — SHORT BIAS',color:'#F5A623', icon:'⏳', urgency:'WAIT', bg:'rgba(245,166,35,0.06)' },
+  WAIT_BREAK:  { label:'WAIT — BREAKOUT',  color:'#FBBF24', icon:'⚡', urgency:'WAIT', bg:'rgba(251,191,36,0.06)' },
+  AVOID_NEWS:  { label:'AVOID — HIGH NEWS',color:'#F87171', icon:'📰', urgency:'AVOID',bg:'rgba(248,113,113,0.06)' },
+  AVOID_CHOP:  { label:'NO SETUP — CHOP',  color:'#475569', icon:'✗',  urgency:'SKIP', bg:'rgba(71,85,105,0.08)'  },
+};
+
+function fmtNum(v) {
+  if (!v&&v!==0) return '—';
+  if (v>=10000) return v.toLocaleString('en-US',{maximumFractionDigits:0});
+  if (v>=100)   return v.toLocaleString('en-US',{maximumFractionDigits:2});
+  if (v>=1)     return v.toFixed(4);
+  return v.toFixed(5);
+}
+
+const SYM_MAP = {
+  GOLD:'XAU/USD', NAS100:'QQQ', NASDAQ:'QQQ', US100:'QQQ', SP500:'SPY',
+  'S&P500':'SPY', SPX:'SPY', BTC:'BTC/USD', BITCOIN:'BTC/USD',
+  ETH:'ETH/USD', OIL:'WTI/USD', DOW:'DIA', DJIA:'DIA',
+};
+const normSym = s => { const u=s.toUpperCase().trim(); return SYM_MAP[u]||u; };
+const dispSym = s => ({ QQQ:'NAS100 (QQQ)', SPY:'S&P500 (SPY)', DIA:'Dow Jones (DIA)' }[s]||s);
+
+// ══════════════════════════════════════════════════════════════════════════
+// UI COMPONENTS
+// ══════════════════════════════════════════════════════════════════════════
+
+const card  = { background:C.surf, border:`1px solid ${C.border}`, borderRadius:16, padding:24 };
+const cardS = { background:C.surf, border:`1px solid ${C.border}`, borderRadius:12, padding:16 };
+
+function IndBar({ label, value, pct, status, color }) {
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+        <span style={{ color:C.muted, fontSize:13 }}>{label}</span>
+        <span style={{ display:'flex', gap:8, alignItems:'center' }}>
+          <span style={{ color:C.text, fontSize:13, fontWeight:700 }}>{value}</span>
+          <span style={{ background:`${color}18`, color, border:`1px solid ${color}35`, borderRadius:5, padding:'1px 8px', fontSize:10, fontWeight:700 }}>{status}</span>
+        </span>
+      </div>
+      <div style={{ height:5, background:'rgba(255,255,255,0.06)', borderRadius:3, overflow:'hidden' }}>
+        <div style={{ height:'100%', width:`${Math.max(2,Math.min(100,pct*100))}%`, background:color, borderRadius:3, transition:'width 0.9s ease' }}/>
+      </div>
+    </div>
+  );
+}
+
+function MiniEquity({ curve }) {
+  if (!curve||curve.length<2) return <div style={{height:80,display:'flex',alignItems:'center',justifyContent:'center',color:C.muted,fontSize:12}}>No backtest trades</div>;
+  const W=360,H=80,PL=4,PR=28,PT=4,PB=14;
+  const min=Math.min(...curve)*0.998,max=Math.max(...curve)*1.002,rng=max-min||1;
+  const sx=i=>PL+(i/(curve.length-1))*(W-PL-PR);
+  const sy=v=>H-PB-((v-min)/rng)*(H-PT-PB);
+  const pts=curve.map((v,i)=>[sx(i),sy(v)]);
+  const line=pts.map((p,i)=>`${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const area=`${line} L${pts[pts.length-1][0].toFixed(1)},${sy(min).toFixed(1)} L${pts[0][0].toFixed(1)},${sy(min).toFixed(1)} Z`;
+  const col=curve[curve.length-1]>=100?C.green:C.red;
+  const final=curve[curve.length-1];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:H}}>
+      <defs><linearGradient id="mieg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={col} stopOpacity="0.2"/>
+        <stop offset="100%" stopColor={col} stopOpacity="0"/>
+      </linearGradient></defs>
+      <path d={area} fill="url(#mieg)"/>
+      <path d={line} fill="none" stroke={col} strokeWidth="1.8"/>
+      <line x1={PL} y1={sy(100)} x2={W-PR} y2={sy(100)} stroke="rgba(255,255,255,0.08)" strokeWidth="1" strokeDasharray="3,4"/>
+      <text x={W-PR+3} y={pts[pts.length-1][1]+4} fill={col} fontSize="9" fontWeight="700">{final.toFixed(0)}</text>
+    </svg>
+  );
+}
+
+const QUICK = [
+  {l:'XAU/USD',e:'🥇'},{l:'NAS100',e:'📈'},{l:'EUR/USD',e:'€'},{l:'GBP/USD',e:'£'},
+  {l:'USD/JPY',e:'¥'},{l:'BTC/USD',e:'₿'},{l:'NVDA',e:'🤖'},{l:'AAPL',e:'🍎'},
+  {l:'SPY',e:'🏦'},{l:'ETH/USD',e:'⟠'},
+];
+
+// ══════════════════════════════════════════════════════════════════════════
+// SMART CHART — DB-driven drawing engine
+// • Loads drawing_rules from Supabase
+// • Filters rules by signal state + indicator conditions
+// • Canvas overlay for filled price zones (entry, SL, TP, demand/supply)
+// • setMarkers() for entry arrows and indicator extremes
+// • Drawing Legend: every drawing shows its WHY (description field)
+// ══════════════════════════════════════════════════════════════════════════
+
+function SmartChart({ candles, sig, tf, drawingRules }) {
+  const wrapperRef   = useRef(null); // outer wrapper — drives canvas size
+  const containerRef = useRef(null); // chart DOM mount point
+  const canvasRef    = useRef(null); // zone overlay canvas
+  const chartRef     = useRef(null);
+  const csRef        = useRef(null); // candlestick series (for priceToCoordinate)
+  const [activeDrawings, setActiveDrawings] = useState([]);
+
+  useEffect(() => {
+    if (!containerRef.current || !candles?.length) return;
+    if (!window.LightweightCharts) return;
+
+    if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; csRef.current = null; }
+
+    // ── price_ref → actual price number ─────────────────────────────
+    function resolvePrice(ref) {
+      if (!ref || !sig) return null;
+      const l = sig.levels || {};
+      const mid = (l.entryLo != null && l.entryHi != null) ? (l.entryLo + l.entryHi) / 2 : sig.price;
+      const map = {
+        entry: mid, entry_lo: l.entryLo, entry_hi: l.entryHi,
+        sl: l.sl, tp1: l.tp1, tp2: l.tp2,
+        wait_zone: l.waitZone, wait_hi: l.waitHi, wait_lo: l.waitLo,
+        ema20: sig.E20, ema50: sig.E50, ema200: sig.E200,
+        bb_upper: sig.BB?.upper, bb_lower: sig.BB?.lower, bb_middle: sig.BB?.middle,
+        vwap: sig.VW, swing_high: sig.swHigh, swing_low: sig.swLow,
+        price: sig.price,
+        break_up:   sig.ATR ? sig.price + sig.ATR * 1.5 : null,
+        break_down: sig.ATR ? sig.price - sig.ATR * 1.5 : null,
+      };
+      return map[ref] ?? null;
+    }
+
+    // ── Filter rules matching this signal ────────────────────────────
+    function getActiveRules() {
+      if (!drawingRules?.length || !sig) return [];
+      const active = new Set(['always', sig.state]);
+      if (sig.R < 32)          active.add('rsi_oversold');
+      if (sig.R > 68)          active.add('rsi_overbought');
+      if (sig.BB?.pctB < 0.08) active.add('bb_lower_touch');
+      if (sig.BB?.pctB > 0.92) active.add('bb_upper_touch');
+      if (sig.BB?.squeeze)     active.add('bb_squeeze');
+
+      return drawingRules.filter(r => {
+        if (!active.has(r.condition_key)) return false;
+        if (r.applies_to_dir && r.applies_to_dir !== 'both' && sig.dir && r.applies_to_dir !== sig.dir) return false;
+        if (r.drawing_type === 'zone') {
+          if (resolvePrice(r.price_ref) == null || resolvePrice(r.price_ref2) == null) return false;
+        } else if (r.drawing_type !== 'marker') {
+          if (resolvePrice(r.price_ref) == null) return false;
+        }
+        return true;
+      }).sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
+    }
+
+    // ── Canvas zone drawing ──────────────────────────────────────────
+    function redrawCanvas() {
+      const canvas  = canvasRef.current;
+      const cs      = csRef.current;
+      const wrapper = wrapperRef.current;
+      if (!canvas || !cs || !wrapper) return;
+
+      const W   = wrapper.offsetWidth  || 800;
+      const H   = wrapper.offsetHeight || 390;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width        = W * dpr;
+      canvas.height       = H * dpr;
+      canvas.style.width  = W + 'px';
+      canvas.style.height = H + 'px';
+
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, W, H);
+
+      // Pane width: full container minus price scale (~65 px on right)
+      const paneW = Math.max(W - 65, 0);
+
+      const zoneRules = getActiveRules().filter(r => r.drawing_type === 'zone');
+
+      for (const r of zoneRules) {
+        const p1 = resolvePrice(r.price_ref);
+        const p2 = resolvePrice(r.price_ref2);
+        if (p1 == null || p2 == null) continue;
+
+        // Higher price → smaller Y (chart is top=high, bottom=low)
+        const y1 = cs.priceToCoordinate(Math.max(p1, p2));
+        const y2 = cs.priceToCoordinate(Math.min(p1, p2));
+        if (y1 == null || y2 == null) continue;
+
+        const top = Math.min(y1, y2);
+        const bot = Math.max(y1, y2);
+        const h   = Math.max(bot - top, 2);
+        if (top > H || bot < 0) continue; // off-screen
+
+        const col = r.color || '#ffffff';
+        const opc = Math.max(0.04, Math.min(0.35, parseFloat(r.opacity) || 0.12));
+
+        // Filled zone
+        ctx.globalAlpha = opc;
+        ctx.fillStyle   = col;
+        ctx.fillRect(0, top, paneW, h);
+
+        // Dashed border lines
+        ctx.globalAlpha = Math.min(1, opc * 3);
+        ctx.strokeStyle = col;
+        ctx.lineWidth   = 1;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(0, top); ctx.lineTo(paneW, top); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, bot); ctx.lineTo(paneW, bot); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Zone label (top-left of zone)
+        if (r.label_text && h > 10) {
+          ctx.globalAlpha  = 0.88;
+          ctx.fillStyle    = col;
+          ctx.font         = 'bold 10px Inter, system-ui, sans-serif';
+          ctx.textBaseline = 'top';
+          ctx.fillText(r.label_text, 8, Math.max(top + 3, 2));
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // ── Build chart ──────────────────────────────────────────────────
+    const { createChart } = window.LightweightCharts;
+    const chart = createChart(containerRef.current, {
+      width:  containerRef.current.offsetWidth,
+      height: 390,
+      layout:  { background: { color: '#07080F' }, textColor: '#64748B', fontSize: 11 },
+      grid:    { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
+      crosshair: { mode: 1 },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)', scaleMargins: { top: 0.08, bottom: 0.05 } },
+      timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false, fixLeftEdge: false },
+      handleScroll: true,
+      handleScale:  true,
+    });
+    chartRef.current = chart;
+
+    // ── Time parser ──────────────────────────────────────────────────
+    const intervalSec = tf==='1day'?86400 : tf==='4h'?14400 : 3600;
+    const parseTime = (c, i) => {
+      if (c.t) {
+        const raw = typeof c.t === 'number' ? c.t : Number(c.t);
+        if (raw > 1e9 && raw < 2e10) return raw;
+        if (raw > 1e12) return Math.floor(raw / 1000);
+        const d = new Date(c.t);
+        if (!isNaN(d)) return Math.floor(d.getTime() / 1000);
+      }
+      return Math.floor(Date.now()/1000) - (candles.length - i) * intervalSec;
+    };
+
+    const seen = new Set();
+    const data = candles
+      .map((c, i) => ({ time: parseTime(c,i), open: parseFloat(c.o||c.v), high: parseFloat(c.h||c.v), low: parseFloat(c.l||c.v), close: parseFloat(c.v) }))
+      .filter(d => { if (isNaN(d.close)||isNaN(d.time)||seen.has(d.time)) return false; seen.add(d.time); return true; })
+      .sort((a,b) => a.time - b.time);
+
+    if (!data.length) { chart.remove(); chartRef.current = null; return; }
+
+    // ── Candlestick series ───────────────────────────────────────────
+    const cs = chart.addCandlestickSeries({
+      upColor:'#34D399', downColor:'#F87171', borderVisible:false,
+      wickUpColor:'rgba(52,211,153,0.75)', wickDownColor:'rgba(248,113,113,0.75)',
+    });
+    cs.setData(data);
+    csRef.current = cs;
+
+    const closes = data.map(d => d.close);
+    const times  = data.map(d => d.time);
+
+    // ── EMA 20 ───────────────────────────────────────────────────────
+    const e20 = emaArr(closes, 20);
+    chart.addLineSeries({ color:'#F5A623', lineWidth:2, priceLineVisible:false, lastValueVisible:true, crosshairMarkerVisible:false, title:'EMA20' })
+         .setData(times.slice(20).map((t,i) => ({ time:t, value:e20[i+20] })));
+
+    // ── EMA 50 ───────────────────────────────────────────────────────
+    const e50 = emaArr(closes, 50);
+    chart.addLineSeries({ color:'#818CF8', lineWidth:1.5, priceLineVisible:false, lastValueVisible:true, crosshairMarkerVisible:false, title:'EMA50' })
+         .setData(times.slice(50).map((t,i) => ({ time:t, value:e50[i+50] })));
+
+    // ── Bollinger Bands ───────────────────────────────────────────────
+    const mkBBs = () => chart.addLineSeries({ color:'rgba(99,102,241,0.45)', lineWidth:1, lineStyle:2, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false });
+    const bbu = mkBBs(), bbl = mkBBs();
+    const bbuD=[], bblD=[];
+    for (let i=20; i<closes.length; i++) {
+      const sl=closes.slice(i-20,i), sma=sl.reduce((a,b)=>a+b)/20;
+      const std=Math.sqrt(sl.map(v=>(v-sma)**2).reduce((a,b)=>a+b)/20);
+      if (times[i]) { bbuD.push({time:times[i],value:sma+2*std}); bblD.push({time:times[i],value:sma-2*std}); }
+    }
+    bbu.setData(bbuD); bbl.setData(bblD);
+
+    // ── Price lines: SL / Entry / TP1 / TP2 ─────────────────────────
+    if (sig?.levels) {
+      const { sl, tp1, tp2, entryLo, entryHi } = sig.levels;
+      const addPL = (price, color, title, style=2) => {
+        const p = parseFloat(price);
+        if (!p || isNaN(p)) return;
+        cs.createPriceLine({ price:p, color, lineWidth:1, lineStyle:style, axisLabelVisible:true, title });
+      };
+      addPL(sl, '#F87171', '✕ SL', 2);
+      addPL((entryLo+entryHi)/2, '#F5A623', '→ ENTRY', 0);
+      addPL(tp1, '#34D399', '✦ TP1', 2);
+      addPL(tp2, '#10B981', '✦ TP2', 2);
+    }
+
+    // ── Markers from drawing rules (entry arrows, RSI extremes) ─────
+    const activeRules = getActiveRules();
+    const markerRules = activeRules.filter(r => r.drawing_type === 'marker');
+    if (markerRules.length && data.length) {
+      const lastTime = data[data.length-1].time;
+      // Group by time to avoid duplicates; LightweightCharts requires sorted markers
+      const markers = markerRules.map(r => ({
+        time:     lastTime,
+        position: r.marker_position || (sig.dir === 'SHORT' ? 'aboveBar' : 'belowBar'),
+        shape:    r.marker_shape    || (sig.dir === 'SHORT' ? 'arrowDown' : 'arrowUp'),
+        color:    r.color          || '#34D399',
+        text:     r.label_text     || '',
+        size: 2,
+      })).sort((a,b) => a.time - b.time);
+      cs.setMarkers(markers);
+    }
+
+    // Update legend state
+    setActiveDrawings(activeRules);
+
+    chart.timeScale().fitContent();
+
+    // Subscribe for redraws (scroll, zoom, crosshair)
+    const doRedraw = () => requestAnimationFrame(redrawCanvas);
+    doRedraw();
+    chart.timeScale().subscribeVisibleLogicalRangeChange(doRedraw);
+    chart.subscribeCrosshairMove(doRedraw);
+
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current) {
+        chart.applyOptions({ width: containerRef.current.offsetWidth });
+        doRedraw();
+      }
+    });
+    ro.observe(containerRef.current);
+
+    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; csRef.current = null; };
+  }, [candles, sig, drawingRules]);
+
+  const BIAS_COLORS = {
+    bullish:'#34D399', bearish:'#F87171',
+    LONG:'#34D399', SHORT:'#F87171', NEUTRAL:'#F5A623', CAUTION:'#FBBF24',
+  };
+  const zoneCount   = activeDrawings.filter(r => r.drawing_type === 'zone').length;
+
+  return (
+    <div>
+      {/* ── Chart wrapper (canvas + LW chart are siblings) ─────────── */}
+      <div ref={wrapperRef} style={{ position:'relative' }}>
+        {/* Zone overlay canvas — pointer-events:none so chart interactions work */}
+        <canvas ref={canvasRef} style={{ position:'absolute', top:0, left:0, pointerEvents:'none', zIndex:5 }}/>
+        {/* Indicator + level legend overlay */}
+        <div style={{ position:'absolute', top:10, left:14, display:'flex', gap:7, flexWrap:'wrap', pointerEvents:'none', zIndex:10 }}>
+          {[['EMA20','#F5A623'],['EMA50','#818CF8'],['BB','rgba(99,102,241,0.7)']].map(([l,c]) => (
+            <span key={l} style={{ background:'rgba(7,8,15,0.88)', padding:'3px 8px', borderRadius:5, fontSize:11, color:c, fontWeight:700, backdropFilter:'blur(4px)' }}>{l}</span>
+          ))}
+          {sig?.levels && [['SL','#F87171'],['ENTRY','#F5A623'],['TP1','#34D399'],['TP2','#10B981']].map(([l,c]) => (
+            <span key={l} style={{ background:'rgba(7,8,15,0.88)', padding:'3px 8px', borderRadius:5, fontSize:11, color:c, fontWeight:700, border:`1px solid ${c}30` }}>── {l}</span>
+          ))}
+          {zoneCount > 0 && (
+            <span style={{ background:'rgba(7,8,15,0.88)', padding:'3px 8px', borderRadius:5, fontSize:11, color:C.amber, fontWeight:700 }}>▭ {zoneCount} zones</span>
+          )}
+        </div>
+        {/* LW chart mount point */}
+        <div ref={containerRef} style={{ width:'100%', borderRadius:'0 0 14px 14px', overflow:'hidden' }}/>
+      </div>
+
+      {/* ── Drawing Legend: every drawing shows WHY it's there ─────── */}
+      {activeDrawings.length > 0 && (
+        <div style={{ padding:'12px 16px', background:'rgba(6,7,16,0.6)', borderTop:'1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10, flexWrap:'wrap' }}>
+            <span style={{ fontSize:12, fontWeight:700, color:C.sub }}>🎨 AI Drawing Engine</span>
+            <span style={{ background:`${C.amber}14`, color:C.amber, border:`1px solid ${C.amber}30`, borderRadius:10, padding:'1px 8px', fontSize:10, fontWeight:700 }}>
+              {activeDrawings.length} ACTIVE
+            </span>
+            <span style={{ color:C.muted, fontSize:10, marginLeft:'auto' }}>Each drawing has a reason from the rules database</span>
+          </div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:7 }}>
+            {activeDrawings.map((r, i) => {
+              const col     = r.color || '#aaa';
+              const biasCol = BIAS_COLORS[r.bias_tag] || C.muted;
+              return (
+                <div key={i} style={{ padding:'7px 11px', background:`${col}08`, border:`1px solid ${col}22`, borderRadius:8, minWidth:190, maxWidth:270, flex:'0 0 auto' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:5, marginBottom:3 }}>
+                    {/* Type indicator */}
+                    {r.drawing_type === 'zone'
+                      ? <div style={{ width:12, height:7, borderRadius:1, background:col, opacity:0.85, flexShrink:0 }}/>
+                      : r.drawing_type === 'marker'
+                      ? <span style={{ fontSize:10, color:col }}>▲</span>
+                      : <div style={{ width:12, height:2, background:col, opacity:0.85, flexShrink:0, borderRadius:1 }}/>
+                    }
+                    <span style={{ fontSize:11, fontWeight:800, color:col, lineHeight:1.3 }}>{r.label_text || r.condition_key}</span>
+                    {r.bias_tag && (
+                      <span style={{ fontSize:9, background:`${biasCol}18`, color:biasCol, borderRadius:3, padding:'1px 5px', fontWeight:700, marginLeft:'auto', flexShrink:0 }}>
+                        {r.bias_tag}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize:10, color:C.muted, lineHeight:1.5 }}>{r.description || '—'}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* If no drawing rules loaded yet, show subtle notice */}
+      {activeDrawings.length === 0 && drawingRules?.length === 0 && (
+        <div style={{ padding:'8px 16px', background:'rgba(6,7,16,0.4)', borderTop:'1px solid rgba(255,255,255,0.05)', color:C.muted, fontSize:11 }}>
+          🎨 Drawing rules loading… zones will appear after rules are fetched from DB.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// MAIN APP
+// ══════════════════════════════════════════════════════════════════════════
+
+function SignalEngine() {
+  const [inputVal, setInputVal] = useState('');
+  const [tf,       setTf]       = useState('1h');
+  const [status,   setStatus]   = useState('idle'); // idle|loading|done|error
+  const [sig,      setSig]      = useState(null);
+  const [bt,       setBt]       = useState(null);
+  const [sym,      setSym]      = useState('');
+  const [step,         setStep]         = useState(0);
+  const [rawCandles,   setRawCandles]   = useState([]);
+  const [drawingRules, setDrawingRules] = useState([]);
+  const [savedToDb,    setSavedToDb]    = useState(false);
+  const [isDemo,       setIsDemo]       = useState(false);
+  const timer = useRef(null);
+
+  // Fetch drawing rules from Supabase once on mount
+  useEffect(() => {
+    fetch(`${SB_URL}/rest/v1/drawing_rules?active=eq.true&order=priority.asc`, { headers: SB_HDR })
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setDrawingRules(data); })
+      .catch(() => {}); // silent — chart still works without rules
+  }, []);
+
+  const STEPS = ['Fetching candles…','Calculating EMAs, RSI, MACD, BB…','Building scenario engine…','Generating signal…'];
+
+  const analyze = useCallback(async (raw) => {
+    const s = normSym(raw || inputVal);
+    if (!s) return;
+    setSym(s);
+    setInputVal(raw || inputVal);
+    setStatus('loading');
+    setSig(null);
+    setBt(null);
+    setStep(0);
+    setIsDemo(false);
+    setSavedToDb(false);
+    let i=0;
+    timer.current = setInterval(()=>{ i++; if(i<STEPS.length) setStep(i); else clearInterval(timer.current); },700);
+
+    try {
+      const enc = encodeURIComponent(s);
+      const [h1r, dr, nr] = await Promise.all([
+        fetch(`${API}/candles?symbol=${enc}&interval=${tf}&outputsize=140`),
+        fetch(`${API}/candles?symbol=${enc}&interval=1day&outputsize=140`),
+        fetch(`${API}/calendar`),
+      ]);
+      clearInterval(timer.current);
+
+      const h1d = await h1r.json();
+      const dd  = await dr.json();
+      const nd  = await nr.json();
+
+      if (!h1d.candles?.length) throw new Error('No candles in API response');
+
+      const candles = h1d.candles;
+      const closes  = candles.map(c=>parseFloat(c.v));
+      const news    = nd.events||[];
+
+      const signal = buildSignal({ closes, candles, newsEvents: news });
+      setSig(signal);
+      setRawCandles(candles);
+      // Persist analysis to Supabase (fire-and-forget)
+      setSavedToDb(false);
+      saveSignalAnalysis(s, tf, signal).then(() => setSavedToDb(true));
+
+      if (dd.candles?.length>=60) setBt(backtest(dd.candles));
+
+      setStatus('done');
+    } catch(e) {
+      clearInterval(timer.current);
+      // ── Offline / demo fallback ─────────────────────────────────────
+      // Generates realistic synthetic price data so the full analysis,
+      // chart, and drawing engine all work without a live API connection.
+      try {
+        const BASE_PRICES = {
+          XAU: 3300, EUR: 1.085, GBP: 1.276, NAS: 19800, USD: 152.4,
+          BTC: 94000, ETH: 3200, SOL: 180, OIL: 82, SPY: 520, QQQ: 430, DIA: 390,
+        };
+        const base = BASE_PRICES[s.slice(0,3)] || BASE_PRICES[s.slice(0,2)] || 100;
+        const nowSec = Math.floor(Date.now()/1000);
+        const intervalSec = tf==='1day'?86400:tf==='4h'?14400:3600;
+
+        // Synthetic walk with trend + noise
+        const fakeClose = Array.from({length:140},(_,i)=>{
+          const trend = Math.sin(i * 0.08) * 0.012;
+          const noise = (Math.random()-0.5) * 0.006;
+          return base * (1 + trend + noise);
+        });
+        const fakeCandles = fakeClose.map((v,i)=>{
+          const range = v * 0.003;
+          const o = i>0 ? fakeClose[i-1] : v * (1+(Math.random()-0.5)*0.002);
+          return {
+            v, o,
+            h: Math.max(v, o) + Math.random()*range,
+            l: Math.min(v, o) - Math.random()*range,
+            t: (nowSec - (fakeClose.length - i) * intervalSec) * 1000,
+            vol: Math.floor(Math.random()*10000+1000),
+          };
+        });
+
+        const signal = buildSignal({closes:fakeClose, candles:fakeCandles, newsEvents:[]});
+        setSig(signal);
+        setRawCandles(fakeCandles);
+        setIsDemo(true);
+        setStatus('done');
+        // Don't save demo analyses to DB
+      } catch(fe) {
+        console.error('Fallback also failed:', fe);
+        setStatus('error');
+      }
+    }
+  }, [inputVal, tf]);
+
+  useEffect(()=>()=>clearInterval(timer.current),[]);
+
+  const meta = sig ? (STATE_META[sig.state]||STATE_META.AVOID_CHOP) : null;
+
+  return (
+    <div style={{ minHeight:'100vh', background:C.bg, color:C.text }}>
+
+      {/* ── NAV ── */}
+      <div style={{ borderBottom:`1px solid ${C.border}`, background:'rgba(6,7,16,0.96)', padding:'0 32px', position:'sticky', top:0, zIndex:100 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:58 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <div style={{ width:30,height:30,borderRadius:8,background:`linear-gradient(135deg,${C.amber},#B85500)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:900 }}>✈</div>
+            <span style={{ fontWeight:900,fontSize:16,letterSpacing:'-0.03em' }}>PropPilot <span style={{color:C.amber}}>AI</span></span>
+            <span style={{ color:C.muted,fontSize:12,marginLeft:4 }}>/ Signal Engine</span>
+          </div>
+          <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+            <div style={{ display:'flex',gap:5,alignItems:'center',padding:'4px 10px',background:'rgba(52,211,153,0.09)',border:'1px solid rgba(52,211,153,0.22)',borderRadius:7,fontSize:11,fontWeight:700,color:C.green }}>
+              <div style={{ width:6,height:6,borderRadius:3,background:C.green,boxShadow:`0 0 6px ${C.green}` }}/>LIVE
+            </div>
+            <a href="index.html" style={{ color:C.muted,fontSize:13,textDecoration:'none',padding:'5px 12px',border:`1px solid ${C.border}`,borderRadius:7 }}>← PropPilot OS</a>
+          </div>
+        </div>
+      </div>
+
+      {/* ── HERO + SEARCH ── */}
+      <div style={{ maxWidth:980, margin:'0 auto' }} className="s-content" style={{ padding:'0 28px' }}>
+        <div style={{ textAlign:'center', padding:'44px 0 30px' }}>
+          <div style={{ display:'inline-flex',alignItems:'center',gap:8,padding:'5px 14px',background:'rgba(245,166,35,0.09)',border:'1px solid rgba(245,166,35,0.22)',borderRadius:20,marginBottom:16 }}>
+            <span style={{ color:C.amber,fontSize:12,fontWeight:700 }}>⚡ STATE MACHINE · SCENARIO ENGINE · REAL DATA</span>
+          </div>
+          <div className="hero-title" style={{ fontSize:42,fontWeight:900,letterSpacing:'-0.03em',lineHeight:1.1,marginBottom:12 }}>
+            Not BUY/SELL — <span style={{color:C.amber}}>Actionable decisions.</span>
+          </div>
+          <div style={{ color:C.sub,fontSize:16,lineHeight:1.65,maxWidth:540,margin:'0 auto' }}>
+            Live TA + Scenario Engine: <strong>ENTER NOW / WAIT FOR / AVOID</strong> with exact price triggers, what-if scenarios, and invalidation levels.
+          </div>
+        </div>
+
+        {/* ── Search ── */}
+        <div style={{ maxWidth:740,margin:'0 auto 16px',display:'flex',gap:10,flexWrap:'wrap' }}>
+          <input
+            value={inputVal}
+            onChange={e=>setInputVal(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&inputVal.trim()&&analyze(inputVal.trim())}
+            placeholder="XAU/USD · NAS100 · EUR/USD · AAPL · BTC/USD…"
+            style={{ flex:1,padding:'13px 16px',background:'rgba(255,255,255,0.05)',border:`1px solid rgba(245,166,35,0.35)`,borderRadius:12,color:C.text,fontSize:15,outline:'none',minWidth:200 }}
+          />
+          <div style={{ display:'flex',gap:6 }}>
+            {['1h','4h','1day'].map(t=>(
+              <button key={t} onClick={()=>setTf(t)}
+                style={{ padding:'13px 11px',borderRadius:9,border:`1px solid ${tf===t?C.amber:C.border}`,background:tf===t?`${C.amber}14`:'transparent',color:tf===t?C.amber:C.muted,fontWeight:700,fontSize:12,cursor:'pointer' }}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <button onClick={()=>inputVal.trim()&&analyze(inputVal.trim())} disabled={status==='loading'||!inputVal.trim()}
+            style={{ padding:'13px 22px',background:status==='loading'?`${C.amber}22`:`linear-gradient(135deg,${C.amber},#C96000)`,border:'none',borderRadius:12,color:status==='loading'?C.amber:'#000',fontSize:15,fontWeight:900,cursor:'pointer',opacity:!inputVal.trim()?0.4:1 }}>
+            {status==='loading'?'⏳':'⚡ Analyze'}
+          </button>
+        </div>
+
+        {/* ── Quick symbols ── */}
+        <div style={{ display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginBottom:36 }}>
+          {QUICK.map(q=>(
+            <button key={q.l} onClick={()=>analyze(q.l)}
+              style={{ padding:'7px 13px',borderRadius:9,border:`1px solid ${sym===normSym(q.l)&&status==='done'?C.amber:C.border}`,background:sym===normSym(q.l)&&status==='done'?`${C.amber}10`:'rgba(255,255,255,0.02)',cursor:'pointer',display:'flex',alignItems:'center',gap:6,transition:'all 0.15s' }}>
+              <span style={{ fontSize:14 }}>{q.e}</span>
+              <span style={{ color:C.text,fontSize:13,fontWeight:700 }}>{q.l}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* ── LOADING ── */}
+        {status==='loading' && (
+          <div style={{ textAlign:'center',padding:'56px 0 80px' }}>
+            <div style={{ fontSize:52,marginBottom:18 }} className="pulse">🧠</div>
+            <div style={{ color:C.sub,fontSize:17,fontWeight:700,marginBottom:8 }}>Analyzing {dispSym(sym)}…</div>
+            <div style={{ display:'flex',gap:8,justifyContent:'center',flexWrap:'wrap',marginTop:20 }}>
+              {STEPS.map((s,i)=>(
+                <div key={s} style={{ padding:'6px 14px',borderRadius:20,border:`1px solid ${i<=step?C.amber:C.border}`,background:i<=step?`${C.amber}12`:'transparent',color:i<=step?C.amber:C.muted,fontSize:12,fontWeight:i<=step?700:400,transition:'all 0.3s' }}>
+                  {i<step?'✓ ':i===step?'⟳ ':''}{s}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── ERROR ── */}
+        {status==='error' && (
+          <div style={{ textAlign:'center',padding:'56px 0 80px' }}>
+            <div style={{ fontSize:44,marginBottom:14 }}>⚠️</div>
+            <div style={{ color:C.red,fontSize:16,fontWeight:700,marginBottom:8 }}>Symbol not found or data unavailable</div>
+            <div style={{ color:C.muted,fontSize:13 }}>Try: XAU/USD · NAS100 · EUR/USD · GBP/USD · AAPL · BTC/USD</div>
+          </div>
+        )}
+
+        {/* ══════════════════════ RESULTS ══════════════════════ */}
+        {status==='done' && sig && meta && (
+          <div className="anim" style={{ paddingBottom:64 }}>
+
+            {/* ── 1. MAIN SIGNAL CARD ── */}
+            <div style={{ ...card, background:meta.bg, border:`2px solid ${meta.color}30`, marginBottom:20 }}>
+              <div style={{ display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:20,marginBottom:20 }}>
+                <div>
+                  <div style={{ color:C.muted,fontSize:11,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:10 }}>
+                    {dispSym(sym)} · {tf.toUpperCase()} · {sig.session} · {new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})} UTC
+                  </div>
+                  <div className="signal-num" style={{ fontSize:46,fontWeight:900,color:meta.color,lineHeight:1,letterSpacing:'-0.02em' }}>
+                    {meta.icon} {meta.label}
+                  </div>
+                  <div style={{ display:'flex',gap:12,marginTop:12,flexWrap:'wrap' }}>
+                    <span style={{ background:`${meta.color}18`,color:meta.color,border:`1px solid ${meta.color}35`,borderRadius:7,padding:'4px 12px',fontSize:12,fontWeight:900 }}>
+                      {meta.urgency}
+                    </span>
+                    <span style={{ color:C.sub,fontSize:14 }}>Price: <strong style={{color:C.text}}>{fmtNum(sig.price)}</strong></span>
+                    <span style={{ color:C.sub,fontSize:14 }}>ATR: <strong style={{color:C.amber}}>{fmtNum(sig.ATR)}</strong></span>
+                    <span style={{ color:C.sub,fontSize:14 }}>Session: <strong style={{color:sig.sessionOK?C.green:C.muted}}>{sig.session}</strong></span>
+                  </div>
+                </div>
+                {/* Confidence gauge */}
+                <div style={{ textAlign:'center',minWidth:100 }}>
+                  <div style={{ fontSize:44,fontWeight:900,color:meta.color,lineHeight:1 }}>{sig.confidence}<span style={{fontSize:20}}>%</span></div>
+                  <div style={{ color:C.muted,fontSize:11,marginTop:4 }}>Confidence</div>
+                  <div style={{ marginTop:10,display:'flex',gap:6,justifyContent:'center' }}>
+                    <div style={{ textAlign:'center',padding:'5px 10px',background:`rgba(52,211,153,0.1)`,borderRadius:8 }}>
+                      <div style={{ color:C.green,fontWeight:800,fontSize:14 }}>▲{sig.bullScore}</div>
+                      <div style={{ color:C.muted,fontSize:9 }}>BULL</div>
+                    </div>
+                    <div style={{ textAlign:'center',padding:'5px 10px',background:'rgba(248,113,113,0.1)',borderRadius:8 }}>
+                      <div style={{ color:C.red,fontWeight:800,fontSize:14 }}>▼{sig.bearScore}</div>
+                      <div style={{ color:C.muted,fontSize:9 }}>BEAR</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Confidence bar */}
+              <div style={{ height:6,background:'rgba(255,255,255,0.06)',borderRadius:3,overflow:'hidden',marginBottom:20 }}>
+                <div style={{ height:'100%',width:`${sig.confidence}%`,background:`linear-gradient(90deg,${meta.color}60,${meta.color})`,borderRadius:3,transition:'width 0.9s ease' }}/>
+              </div>
+
+              {/* Rationale */}
+              <div style={{ padding:'14px 18px',background:'rgba(255,255,255,0.03)',borderRadius:12,marginBottom:sig.trigger||sig.levels?16:0 }}>
+                <div style={{ fontSize:11,color:C.indigo,fontWeight:700,marginBottom:8,letterSpacing:'0.08em' }}>🧠 ANALYSIS</div>
+                <p style={{ color:C.sub,fontSize:13,lineHeight:1.85,margin:0 }}>{sig.rationale}</p>
+              </div>
+
+              {/* Trigger */}
+              {sig.trigger && (
+                <div style={{ padding:'12px 16px',background:`${meta.color}08`,border:`1px solid ${meta.color}25`,borderRadius:11,marginBottom:sig.invalidation?12:0 }}>
+                  <div style={{ fontSize:11,color:meta.color,fontWeight:700,marginBottom:6,letterSpacing:'0.07em' }}>
+                    {meta.urgency==='NOW'?'✓ ENTRY TRIGGER':'⏳ WAIT FOR'}
+                  </div>
+                  <p style={{ color:C.text,fontSize:13,lineHeight:1.8,margin:0,fontWeight:500 }}>{sig.trigger}</p>
+                </div>
+              )}
+
+              {/* Invalidation */}
+              {sig.invalidation && (
+                <div style={{ padding:'12px 16px',background:'rgba(248,113,113,0.06)',border:'1px solid rgba(248,113,113,0.2)',borderRadius:11,marginTop:12 }}>
+                  <div style={{ fontSize:11,color:C.red,fontWeight:700,marginBottom:6,letterSpacing:'0.07em' }}>⚠ INVALIDATION</div>
+                  <p style={{ color:C.sub,fontSize:13,lineHeight:1.8,margin:0 }}>{sig.invalidation}</p>
+                </div>
+              )}
+            </div>
+
+            {/* ── 2. SMART CHART ── */}
+            {rawCandles.length > 0 && (
+              <div style={{ borderRadius:14, border:`1px solid rgba(255,255,255,0.07)`, background:'rgba(255,255,255,0.02)', overflow:'hidden', marginBottom:20 }}>
+                <div style={{ padding:'14px 16px', borderBottom:'1px solid rgba(255,255,255,0.07)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:10 }}>
+                  <div style={{ fontWeight:800, fontSize:15 }}>
+                    📊 {tf.toUpperCase()} · {dispSym(sym)}
+                    <span style={{ color:C.muted, fontWeight:400, fontSize:12, marginLeft:10 }}>
+                      {isDemo ? '⚠ Demo data · API offline' : 'Live candles · AI zones · scroll & zoom'}
+                    </span>
+                  </div>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                    {drawingRules.length > 0 && (
+                      <span style={{ fontSize:10, color:C.amber, background:`${C.amber}10`, border:`1px solid ${C.amber}25`, borderRadius:6, padding:'2px 8px', fontWeight:700 }}>
+                        ▭ {drawingRules.length} rules loaded
+                      </span>
+                    )}
+                    {isDemo && (
+                      <span style={{ fontSize:10, color:C.yellow, background:`${C.yellow}10`, border:`1px solid ${C.yellow}30`, borderRadius:6, padding:'2px 8px', fontWeight:700 }}>
+                        DEMO
+                      </span>
+                    )}
+                    {savedToDb && !isDemo && (
+                      <span style={{ fontSize:10, color:C.green, background:`${C.green}10`, border:`1px solid ${C.green}25`, borderRadius:6, padding:'2px 8px', fontWeight:700 }}>
+                        ✓ Saved to DB
+                      </span>
+                    )}
+                    <span style={{ fontSize:11, color:C.muted }}>Price:</span>
+                    <span style={{ fontSize:13, fontWeight:800, color:C.amber }}>{fmtNum(sig.price)}</span>
+                  </div>
+                </div>
+                <SmartChart candles={rawCandles} sig={sig} tf={tf} drawingRules={drawingRules}/>
+              </div>
+            )}
+
+            {/* ── 3. ENTRY PLAN (if actionable) ── */}
+            {sig.levels && (sig.state==='LONG_NOW'||sig.state==='SHORT_NOW'||sig.state==='WAIT_LONG'||sig.state==='WAIT_SHORT') && (
+              <div style={{ ...card,marginBottom:20 }}>
+                <div style={{ fontWeight:800,fontSize:15,marginBottom:18 }}>
+                  📋 Trade Plan — {sig.state==='LONG_NOW'||sig.state==='WAIT_LONG'?'LONG':'SHORT'}
+                  {(sig.state==='WAIT_LONG'||sig.state==='WAIT_SHORT') && <span style={{ color:C.amber,fontSize:13,fontWeight:600,marginLeft:8 }}>(Entry pending trigger)</span>}
+                </div>
+                {sig.levels.waitZone && (
+                  <div style={{ padding:'12px 16px',background:'rgba(245,166,35,0.08)',border:'1px solid rgba(245,166,35,0.25)',borderRadius:10,marginBottom:16 }}>
+                    <span style={{ color:C.amber,fontWeight:700,fontSize:13 }}>⏳ WAIT ZONE: </span>
+                    <span style={{ color:C.sub,fontSize:13 }}>
+                      {sig.state==='WAIT_LONG'?`Long entry when price reaches ${fmtNum(sig.levels.waitZone)} – ${fmtNum(sig.levels.waitHi)}`:`Short entry when price reaches ${fmtNum(sig.levels.waitLo)} – ${fmtNum(sig.levels.waitZone)}`}
+                    </span>
+                  </div>
+                )}
+                <div className="grid-3" style={{ display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16 }}>
+                  {[
+                    ['Entry Zone', `${fmtNum(sig.levels.entryLo)} – ${fmtNum(sig.levels.entryHi)}`, C.text],
+                    ['Stop Loss',  fmtNum(sig.levels.sl),    C.red],
+                    ['TP1',        fmtNum(sig.levels.tp1),   C.green],
+                    ['R:R TP1',    `1:${sig.levels.rrTp1}`,  C.amber],
+                    ['TP2',        fmtNum(sig.levels.tp2),   C.green],
+                    ['R:R TP2',    `1:${sig.levels.rrTp2}`,  C.amber],
+                  ].map(([l,v,col])=>(
+                    <div key={l} style={{ padding:'12px 14px',background:'rgba(255,255,255,0.04)',borderRadius:10 }}>
+                      <div style={{ color:C.muted,fontSize:10,marginBottom:5 }}>{l}</div>
+                      <div style={{ color:col,fontWeight:800,fontSize:14 }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* SL/TP visualization */}
+                <div style={{ height:32,background:'rgba(255,255,255,0.03)',borderRadius:8,position:'relative',overflow:'hidden',marginBottom:12 }}>
+                  {(()=>{
+                    const l=sig.levels, isLong=sig.state==='LONG_NOW'||sig.state==='WAIT_LONG';
+                    const span=Math.abs(l.tp2-l.sl)||1;
+                    const slPct=isLong?(sig.price-l.sl)/span*100:(l.sl-sig.price)/span*100;
+                    const tp1Pct=isLong?(l.tp1-sig.price)/span*100:(sig.price-l.tp1)/span*100;
+                    const tp2Pct=100;
+                    return (
+                      <>
+                        <div style={{ position:'absolute',left:0,top:0,width:`${slPct}%`,height:'100%',background:'rgba(248,113,113,0.2)',borderRight:'2px solid #F87171',display:'flex',alignItems:'center',justifyContent:'flex-end',paddingRight:6 }}>
+                          <span style={{ color:C.red,fontSize:10,fontWeight:700,whiteSpace:'nowrap' }}>SL</span>
+                        </div>
+                        <div style={{ position:'absolute',left:`${slPct}%`,top:0,width:`${tp1Pct}%`,height:'100%',background:'rgba(52,211,153,0.12)',borderRight:'2px dashed #34D399',display:'flex',alignItems:'center',justifyContent:'flex-end',paddingRight:6 }}>
+                          <span style={{ color:C.green,fontSize:10,fontWeight:700 }}>TP1</span>
+                        </div>
+                        <div style={{ position:'absolute',right:0,top:0,width:'20%',height:'100%',background:'rgba(52,211,153,0.06)',display:'flex',alignItems:'center',justifyContent:'flex-end',paddingRight:6 }}>
+                          <span style={{ color:C.green,fontSize:10,fontWeight:500,opacity:0.6 }}>TP2</span>
+                        </div>
+                        <div style={{ position:'absolute',left:`${slPct}%`,top:'20%',width:3,height:'60%',background:meta.color,boxShadow:`0 0 6px ${meta.color}`,borderRadius:2 }}/>
+                      </>
+                    );
+                  })()}
+                </div>
+                <div style={{ fontSize:11,color:C.muted }}>
+                  Visual: SL ← [{sig.state==='LONG_NOW'||sig.state==='WAIT_LONG'?'▲ LONG':'▼ SHORT'} Entry] → TP1 → TP2 — based on ATR {fmtNum(sig.ATR)}
+                </div>
+              </div>
+            )}
+
+            {/* ── 3. SCENARIOS ── */}
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontWeight:800,fontSize:15,marginBottom:14 }}>📊 3 Scenarios — What If…</div>
+              <div className="grid-3" style={{ display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:14 }}>
+                {sig.scenarios.map((sc,i)=>(
+                  <div key={sc.name} style={{ ...cardS,borderColor:`${sc.color}22`,background:`${sc.color}05`,position:'relative' }}>
+                    <div style={{ display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10 }}>
+                      <div style={{ display:'flex',alignItems:'center',gap:7 }}>
+                        <span style={{ color:sc.color,fontSize:18,fontWeight:900 }}>{sc.icon}</span>
+                        <span style={{ color:sc.color,fontSize:12,fontWeight:800 }}>{sc.name}</span>
+                      </div>
+                      <div style={{ background:`${sc.color}18`,color:sc.color,border:`1px solid ${sc.color}35`,borderRadius:12,padding:'2px 9px',fontSize:11,fontWeight:800 }}>{sc.prob}%</div>
+                    </div>
+                    <div style={{ fontSize:11,color:C.muted,marginBottom:8,padding:'6px 10px',background:'rgba(255,255,255,0.04)',borderRadius:7 }}>
+                      <strong style={{color:C.sub}}>If: </strong>{sc.condition}
+                    </div>
+                    <p style={{ color:C.sub,fontSize:12,lineHeight:1.75,margin:'0 0 8px' }}>{sc.body}</p>
+                    <div style={{ fontSize:11,color:sc.color,fontWeight:700 }}>→ Target: {sc.target}</div>
+                    {/* prob bar */}
+                    <div style={{ height:3,background:'rgba(255,255,255,0.06)',borderRadius:2,overflow:'hidden',marginTop:12 }}>
+                      <div style={{ height:'100%',width:`${sc.prob}%`,background:sc.color,borderRadius:2 }}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ── 4. KEY LEVELS ── */}
+            <div style={{ ...card,marginBottom:20 }}>
+              <div style={{ fontWeight:800,fontSize:15,marginBottom:16 }}>🎯 Key Levels to Watch</div>
+              <div className="grid-3" style={{ display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10 }}>
+                {sig.watchLevels.map(lv=>{
+                  const dist=(lv.price-sig.price)/sig.price*100;
+                  const above=lv.price>sig.price;
+                  return (
+                    <div key={lv.label} style={{ padding:'12px 14px',background:'rgba(255,255,255,0.03)',borderRadius:10,border:`1px solid ${C.border}` }}>
+                      <div style={{ color:C.muted,fontSize:10,marginBottom:4 }}>{lv.label}</div>
+                      <div style={{ color:above?C.red:C.green,fontWeight:800,fontSize:14 }}>{fmtNum(lv.price)}</div>
+                      <div style={{ color:C.muted,fontSize:10,marginTop:3 }}>{dist>=0?'+':''}{dist.toFixed(2)}%</div>
+                      <div style={{ color:C.muted,fontSize:10,marginTop:2 }}>{lv.note}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── 5. TECHNICALS + BACKTEST ── */}
+            <div className="grid-2" style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:20 }}>
+              {/* Technical indicators */}
+              <div style={{ ...card }}>
+                <div style={{ fontWeight:800,fontSize:15,marginBottom:20 }}>📈 Technical Snapshot</div>
+                <IndBar label="RSI (14)" value={sig.R.toFixed(1)} pct={sig.R/100}
+                  status={sig.R<30?'OVERSOLD':sig.R>70?'OVERBOUGHT':'NEUTRAL'}
+                  color={sig.R<30?C.green:sig.R>70?C.red:C.yellow}/>
+                <IndBar label="MACD Histogram" value={sig.M.hist>0?`+${sig.M.hist.toFixed(5)}`:sig.M.hist.toFixed(5)}
+                  pct={0.5+Math.max(-0.45,Math.min(0.45,sig.M.hist!==0?0.45:0))}
+                  status={sig.M.bullish?'BULL EXPAND':sig.M.bearish?'BEAR EXPAND':'FLAT'}
+                  color={sig.M.bullish?C.green:sig.M.bearish?C.red:C.yellow}/>
+                <IndBar label="EMA 20 / 50" value={sig.E20>sig.E50?'BULL STACK':'BEAR STACK'}
+                  pct={sig.E20>sig.E50?0.78:0.22}
+                  status={sig.E20>sig.E50?'UPTREND':'DOWNTREND'}
+                  color={sig.E20>sig.E50?C.green:C.red}/>
+                <IndBar label="Bollinger %B" value={`${(sig.BB.pctB*100).toFixed(0)}%`}
+                  pct={sig.BB.pctB}
+                  status={sig.BB.pctB<0.2?'LOWER BAND':sig.BB.pctB>0.8?'UPPER BAND':sig.BB.squeeze?'SQUEEZE':'MID RANGE'}
+                  color={sig.BB.pctB<0.2?C.green:sig.BB.pctB>0.8?C.red:sig.BB.squeeze?C.amber:C.yellow}/>
+                <IndBar label={`VWAP (24h)`} value={fmtNum(sig.VW)}
+                  pct={sig.price>sig.VW?0.7:0.3}
+                  status={sig.price>sig.VW?'ABOVE':'BELOW'}
+                  color={sig.price>sig.VW?C.green:C.red}/>
+
+                {/* Score bars */}
+                <div style={{ borderTop:`1px solid ${C.border}`,marginTop:16,paddingTop:14 }}>
+                  <div style={{ color:C.muted,fontSize:11,textTransform:'uppercase',letterSpacing:'0.07em',marginBottom:10 }}>Bull vs Bear Score</div>
+                  <div style={{ display:'flex',alignItems:'center',gap:10,marginBottom:8 }}>
+                    <div style={{ width:60,fontSize:12,color:C.green,fontWeight:700 }}>BULL {sig.bullScore}</div>
+                    <div style={{ flex:1,height:8,background:'rgba(255,255,255,0.05)',borderRadius:4,overflow:'hidden' }}>
+                      <div style={{ height:'100%',width:`${sig.bullScore/(sig.bullScore+sig.bearScore||1)*100}%`,background:`linear-gradient(90deg,${C.green}80,${C.green})`,borderRadius:4 }}/>
+                    </div>
+                  </div>
+                  <div style={{ display:'flex',alignItems:'center',gap:10 }}>
+                    <div style={{ width:60,fontSize:12,color:C.red,fontWeight:700 }}>BEAR {sig.bearScore}</div>
+                    <div style={{ flex:1,height:8,background:'rgba(255,255,255,0.05)',borderRadius:4,overflow:'hidden' }}>
+                      <div style={{ height:'100%',width:`${sig.bearScore/(sig.bullScore+sig.bearScore||1)*100}%`,background:`linear-gradient(90deg,${C.red}80,${C.red})`,borderRadius:4 }}/>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Backtest */}
+              <div style={{ ...card }}>
+                <div style={{ fontWeight:800,fontSize:15,marginBottom:4 }}>🔬 6-Month Backtest</div>
+                <div style={{ color:C.muted,fontSize:12,marginBottom:14 }}>EMA 20/50 crossover · daily candles · last 130 sessions</div>
+                <MiniEquity curve={bt?.curve}/>
+                {bt&&bt.trades.length>0?(
+                  <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginTop:14 }}>
+                    {[
+                      ['Win Rate',`${bt.wr.toFixed(0)}%`,bt.wr>=50?C.green:C.red],
+                      ['Return',`${bt.tot>=0?'+':''}${bt.tot.toFixed(1)}%`,bt.tot>=0?C.green:C.red],
+                      ['Max DD',`-${bt.maxDD.toFixed(1)}%`,C.yellow],
+                      ['Trades',`${bt.trades.length}`,C.sub],
+                      ['Avg Win',`+${bt.aw.toFixed(1)}%`,C.green],
+                      ['Prof. Factor',bt.pf>=99?'∞':bt.pf.toFixed(1),bt.pf>=1.5?C.green:C.yellow],
+                    ].map(([l,v,col])=>(
+                      <div key={l} style={{ padding:'9px',background:'rgba(255,255,255,0.03)',borderRadius:8 }}>
+                        <div style={{ color:C.muted,fontSize:10,marginBottom:3 }}>{l}</div>
+                        <div style={{ color:col,fontWeight:800,fontSize:13 }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                ):(
+                  <div style={{ marginTop:14,color:C.muted,fontSize:13,textAlign:'center' }}>
+                    {bt?'No crossover trades in this period':'Insufficient daily data for backtest'}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Disclaimer ── */}
+            <div style={{ padding:'14px 20px',background:'rgba(255,255,255,0.02)',border:`1px solid ${C.border}`,borderRadius:12,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:12 }}>
+              <span style={{ color:C.muted,fontSize:12 }}>⚠️ Technical analysis only — not financial advice. Backtest past performance ≠ future results. Always use risk management.</span>
+              <a href="index.html" style={{ color:C.amber,fontSize:13,fontWeight:700,textDecoration:'none',whiteSpace:'nowrap' }}>Open PropPilot OS →</a>
+            </div>
+          </div>
+        )}
+
+        {/* ── IDLE state ── */}
+        {status==='idle' && (
+          <div className="grid-3" style={{ display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:16,paddingBottom:60 }}>
+            {[
+              { icon:'⚡', col:C.amber,  t:'5 Decision States',   b:'ENTER NOW · WAIT FOR PULLBACK · WAIT FOR BREAKOUT · AVOID NEWS · NO SETUP. Not generic BUY/SELL.' },
+              { icon:'📋', col:C.green,  t:'Full Trade Plan',      b:'ATR-based entry zone, stop loss, TP1 and TP2. Visual SL/TP bar. All calculated from live data.' },
+              { icon:'📊', col:C.indigo, t:'3 Scenario Engine',    b:'Bull case / Bear case / Base case with probability estimates and specific price triggers for each.' },
+              { icon:'🎯', col:C.teal,   t:'8 Key Price Levels',   b:'EMA20/50/200, Bollinger upper/middle/lower, VWAP, swing high/low — all with distance % from current.' },
+              { icon:'🔬', col:C.yellow, t:'6-Month Backtest',     b:'EMA crossover strategy tested on 130 daily candles. Win rate, return, max drawdown, profit factor.' },
+              { icon:'📰', col:C.red,    t:'News Risk Check',      b:'High-impact events within 4 hours trigger AVOID_NEWS state. Overrides all other signals automatically.' },
+            ].map(f=>(
+              <div key={f.t} style={{ background:'rgba(255,255,255,0.02)',border:`1px solid ${C.border}`,borderRadius:14,padding:22 }}>
+                <div style={{ fontSize:26,marginBottom:10 }}>{f.icon}</div>
+                <div style={{ fontWeight:800,fontSize:14,color:f.col,marginBottom:8 }}>{f.t}</div>
+                <div style={{ color:C.sub,fontSize:13,lineHeight:1.7 }}>{f.b}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<SignalEngine/>);
+</script>
+</body>
+</html>

@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PropPilot — Bot Monitor v3</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.2/dist/umd/supabase.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body,#root{min-height:100%}
+    body{background:#060710;color:#F1F5F9;font-family:'Inter',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+    ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+    button,input,select{font-family:inherit;outline:none}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+    .anim{animation:slideIn .35s ease forwards}
+    .spin{animation:spin 1s linear infinite;display:inline-block}
+    .blink{animation:blink 1.4s ease-in-out infinite}
+    .pulse{animation:pulse 2s ease-in-out infinite}
+    .tr-hover:hover{background:rgba(255,255,255,.025)!important;cursor:default}
+    input[type=number]::-webkit-inner-spin-button{opacity:.5}
+    input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:#818CF8}
+  </style>
+</head>
+<body><div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useRef,useMemo}=React;
+
+// ── Config ──────────────────────────────────────────────────────────────────
+const SB_URL='https://nxiednydxyrtxpkmgtof.supabase.co';
+const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
+const SB_HDR={'apikey':SB_KEY,'Authorization':`Bearer ${SB_KEY}`,'Content-Type':'application/json'};
+const FN_URL=`${SB_URL}/functions/v1`;
+
+// Supabase client (for Realtime)
+const sbClient=(()=>{try{return supabase.createClient(SB_URL,SB_KEY);}catch(e){console.warn('Supabase client unavailable',e);return null;}})();
+
+// ── Colors ───────────────────────────────────────────────────────────────────
+const C={
+  bg:'#060710',surf:'rgba(255,255,255,.04)',surfHi:'rgba(255,255,255,.07)',
+  border:'rgba(255,255,255,.07)',borderHi:'rgba(255,255,255,.13)',
+  text:'#F1F5F9',sub:'#94A3B8',muted:'#475569',
+  green:'#34D399',red:'#F87171',amber:'#F5A623',yellow:'#FBBF24',
+  indigo:'#818CF8',teal:'#2DD4BF',blue:'#60A5FA',purple:'#C084FC',
+};
+
+const STATUS_COLOR={OPEN:C.amber,TP1_HIT:C.teal,TP2_HIT:C.green,SL_HIT:C.red,MANUAL_CLOSE:C.sub,EXPIRED:C.muted,KILL_SWITCH:C.red};
+const ACTION_COLOR={'OPEN_TRADE':C.green,'REJECT_PAUSED':C.muted,'REJECT_KILL_SWITCH':C.red,'REJECT_MAX_POS':C.amber,'REJECT_CONFIDENCE':C.amber,'REJECT_DUPLICATE':C.amber,'REJECT_CORRELATION':C.purple,'CLOSE_TP1':C.teal,'CLOSE_TP2':C.green,'CLOSE_SL':C.red,'CLOSE_MANUAL':C.sub,'CLOSE_KILL_SWITCH':C.red};
+const SESSION_META={london_open:{label:'London Open',color:C.indigo,time:'07:00',icon:'🇬🇧'},ny_premarket:{label:'NY Pre-Mkt',color:C.blue,time:'08:30',icon:'🌅'},ny_open:{label:'NY Open',color:C.green,time:'13:00',icon:'🇺🇸'},adhoc:{label:'Manual',color:C.sub,time:'—',icon:'🔧'}};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const fmtNum=(v,d=2)=>{if(v==null||isNaN(v))return'—';const a=Math.abs(v);if(a>=10000)return v.toLocaleString('en-US',{maximumFractionDigits:0});if(a>=100)return v.toFixed(d);if(a>=1)return v.toFixed(4);return v.toFixed(5);};
+const fmtUsd=(v,showPlus=true)=>{if(v==null)return'—';const s=showPlus&&v>0?'+':'';return`${s}$${Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})}`;};
+const fmtR=(v)=>{if(v==null)return'—';return`${v>=0?'+':''}${(+v).toFixed(2)}R`;};
+const fmtPct=(v)=>{if(v==null)return'—';return`${v>=0?'+':''}${(+v).toFixed(1)}%`;};
+const timeAgo=(iso)=>{if(!iso)return'—';const s=Math.floor((Date.now()-new Date(iso).getTime())/1000);if(s<60)return`${s}s ago`;if(s<3600)return`${Math.floor(s/60)}m ago`;if(s<86400)return`${Math.floor(s/3600)}h ago`;return`${Math.floor(s/86400)}d ago`;};
+const fmtTime=(iso)=>{if(!iso)return'—';return new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'UTC'})+' UTC';};
+const pnlColor=(v)=>(+v||0)>=0?C.green:C.red;
+
+function getNextRun(){
+  const now=new Date(),h=now.getUTCHours(),m=now.getUTCMinutes(),d=now.getUTCDay();
+  const we=d===0||d===6;
+  const sched=[{h:7,m:0,l:'London Open'},{h:8,m:30,l:'NY Pre-Mkt'},{h:13,m:0,l:'NY Open'},{h:16,m:0,l:'NY Mid'},{h:20,m:0,l:'Day End'}];
+  if(!we){for(const s of sched){if(h<s.h||(h===s.h&&m<s.m)){const diff=Math.floor((new Date(now).setUTCHours(s.h,s.m,0,0)-Date.now())/60000);return{label:s.l,in:diff<60?`${diff}m`:`${Math.floor(diff/60)}h ${diff%60>0?diff%60+'m':''}`.trim()};}}}
+  return{label:'London Open',in:d===5?'~3d':d===6?'~2d':'~1d'};
+}
+
+// ── API helpers ──────────────────────────────────────────────────────────────
+const api = async(path, opts={})=>{
+  const r=await fetch(`${SB_URL}/rest/v1/${path}`,{headers:{...SB_HDR,...(opts.headers||{})},...opts});
+  if(!r.ok){const t=await r.text();throw new Error(t);}
+  const ct=r.headers.get('content-type')||'';
+  return ct.includes('json')?r.json():null;
+};
+
+// ── UI Components ─────────────────────────────────────────────────────────────
+function Pill({children,color=C.sub}){
+  return <span style={{display:'inline-block',padding:'2px 9px',borderRadius:100,fontSize:10,fontWeight:700,letterSpacing:'.04em',background:`${color}18`,color,border:`1px solid ${color}30`}}>{children}</span>;
+}
+
+function Btn({children,onClick,disabled,variant='default',small,style={}}){
+  const v={
+    default:{bg:'rgba(255,255,255,.07)',border:`1px solid ${C.border}`,color:C.sub},
+    primary:{bg:'linear-gradient(135deg,#818CF8,#6366F1)',border:'none',color:C.text},
+    danger:{bg:'rgba(248,113,113,.12)',border:'1px solid rgba(248,113,113,.3)',color:C.red},
+    success:{bg:'rgba(52,211,153,.1)',border:'1px solid rgba(52,211,153,.3)',color:C.green},
+    amber:{bg:'rgba(245,166,35,.1)',border:'1px solid rgba(245,166,35,.3)',color:C.amber},
+  }[variant]||{};
+  return(
+    <button onClick={onClick} disabled={disabled}
+      style={{padding:small?'6px 13px':'9px 17px',borderRadius:10,fontSize:small?11:13,fontWeight:600,cursor:disabled?'not-allowed':'pointer',display:'inline-flex',alignItems:'center',gap:5,opacity:disabled?.55:1,transition:'opacity .15s',...v,...style}}>
+      {children}
+    </button>
+  );
+}
+
+function KpiCard({label,value,sub,color=C.text,icon,glow}){
+  return(
+    <div style={{background:C.surf,border:`1px solid ${glow?color+'40':C.border}`,borderRadius:16,padding:'18px 20px',position:'relative',overflow:'hidden'}}>
+      {glow&&<div style={{position:'absolute',inset:0,background:`radial-gradient(ellipse at top left, ${color}08 0%, transparent 70%)`}}/>}
+      <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:7}}>
+        {icon&&<span style={{fontSize:17}}>{icon}</span>}
+        <span style={{color:C.muted,fontSize:10,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase'}}>{label}</span>
+      </div>
+      <div style={{fontSize:24,fontWeight:800,color,lineHeight:1}}>{value}</div>
+      {sub&&<div style={{color:C.muted,fontSize:11,marginTop:5,lineHeight:1.4}}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── Kill-Switch Banner ────────────────────────────────────────────────────────
+function KillSwitchBanner({account,onReset,resetting}){
+  if(!account?.kill_switch_active) return null;
+  return(
+    <div className="anim" style={{margin:'0 0 20px',padding:'14px 18px',borderRadius:14,background:'rgba(248,113,113,.1)',border:'1px solid rgba(248,113,113,.35)',display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+      <div style={{fontSize:22}}>🚨</div>
+      <div style={{flex:1,minWidth:200}}>
+        <div style={{color:C.red,fontWeight:800,fontSize:14,marginBottom:2}}>KILL-SWITCH ACTIVE — Trading Halted</div>
+        <div style={{color:'rgba(248,113,113,.8)',fontSize:12}}>{account.kill_switch_reason||'Daily loss limit reached'} · Triggered {timeAgo(account.kill_switch_at)}</div>
+      </div>
+      <Btn variant="danger" onClick={onReset} disabled={resetting}>
+        {resetting?<><span className="spin">⟳</span> Resetting…</>:'🔓 Reset Kill-Switch'}
+      </Btn>
+    </div>
+  );
+}
+
+// ── Equity Curve ─────────────────────────────────────────────────────────────
+function EquityCurve({snapshots,startBal=100000}){
+  if(!snapshots?.length) return(
+    <div style={{height:180,display:'flex',alignItems:'center',justifyContent:'center',color:C.muted,flexDirection:'column',gap:8}}>
+      <span style={{fontSize:28}}>📈</span>
+      <span style={{fontSize:12}}>Equity curve appears after first equity snapshot</span>
+    </div>
+  );
+  const W=700,H=180,PL=48,PR=20,PT=12,PB=26;
+  const vals=snapshots.map(s=>+(s.equity||s.balance||startBal));
+  const allVals=[startBal,...vals];
+  const mn=Math.min(...allVals)*0.9985,mx=Math.max(...allVals)*1.0015,rng=mx-mn||1;
+  const sx=i=>PL+(i/snapshots.length)*(W-PL-PR);
+  const sy=v=>H-PB-((v-mn)/rng)*(H-PT-PB);
+  const pts=[[PL,sy(startBal)],...snapshots.map((s,i)=>[sx(i+1),sy(+(s.equity||s.balance||startBal))])];
+  const line=pts.map((p,i)=>`${i===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const fill=`${line} L${pts[pts.length-1][0].toFixed(1)},${(H-PB).toFixed(1)} L${PL},${(H-PB).toFixed(1)} Z`;
+  const last=vals[vals.length-1];
+  const col=last>=startBal?C.green:C.red;
+  const baseY=sy(startBal);
+  const yLbls=[mn,mn+rng/2,mx].map(v=>({y:sy(v),l:`$${(v/1000).toFixed(1)}k`}));
+  return(
+    <div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+        <span style={{color:C.muted,fontSize:11}}>Equity Curve <span style={{color:C.muted}}>· {snapshots.length} snapshots</span></span>
+        <span style={{fontWeight:700,fontSize:13,color:col}}>
+          {fmtUsd(last,false)} <span style={{fontWeight:400,fontSize:11}}>{fmtPct((last-startBal)/startBal*100)}</span>
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:H,overflow:'visible'}}>
+        <defs>
+          <linearGradient id="eqg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={col} stopOpacity=".22"/>
+            <stop offset="100%" stopColor={col} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        {yLbls.map((y,i)=>(
+          <g key={i}>
+            <line x1={PL} y1={y.y} x2={W-PR} y2={y.y} stroke="rgba(255,255,255,.04)" strokeWidth="1"/>
+            <text x={PL-4} y={y.y+3.5} fill={C.muted} fontSize="8.5" textAnchor="end">{y.l}</text>
+          </g>
+        ))}
+        <line x1={PL} y1={baseY} x2={W-PR} y2={baseY} stroke="rgba(255,255,255,.18)" strokeWidth="1" strokeDasharray="4 4"/>
+        <text x={W-PR+3} y={baseY+3.5} fill={C.muted} fontSize="8.5">start</text>
+        <path d={fill} fill="url(#eqg)"/>
+        <path d={line} fill="none" stroke={col} strokeWidth="2" strokeLinejoin="round"/>
+        <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="3.5" fill={col} stroke={C.bg} strokeWidth="2"/>
+      </svg>
+    </div>
+  );
+}
+
+// ── Open Positions Table ──────────────────────────────────────────────────────
+function LivePositions({positions,prices,onClose,closingId}){
+  if(!positions.length) return(
+    <div style={{textAlign:'center',padding:'44px 20px',color:C.muted}}>
+      <div style={{fontSize:36,marginBottom:10}}>📋</div>
+      <div style={{fontWeight:600,fontSize:14,marginBottom:5}}>No open positions</div>
+      <div style={{fontSize:12}}>Bot opens trades on LONG_NOW / SHORT_NOW signals ≥ confidence threshold</div>
+    </div>
+  );
+  const TH=({ch,right})=><th style={{padding:'7px 11px',color:C.muted,fontWeight:600,fontSize:10,textAlign:right?'right':'left',textTransform:'uppercase',letterSpacing:'.05em',whiteSpace:'nowrap'}}>{ch}</th>;
+  return(
+    <div style={{overflowX:'auto'}}>
+      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+        <thead><tr style={{borderBottom:`1px solid ${C.border}`}}>
+          <TH ch="Symbol"/><TH ch="Dir"/><TH ch="Lot"/><TH ch="Entry" right/><TH ch="SL" right/><TH ch="TP1" right/><TH ch="TP2" right/>
+          <TH ch="Current" right/><TH ch="Float P&L" right/><TH ch="Risk $"/><TH ch="Corr"/><TH ch="Status"/>
+          <TH ch="Opened"/><TH ch="Close"/>
+        </tr></thead>
+        <tbody>
+        {positions.map(p=>{
+          const dc=p.direction==='LONG'?C.green:C.red;
+          const cur=prices[p.symbol];
+          let fR=null,fUsd=null;
+          if(cur&&p.entry_price&&p.sl_price){
+            const slD=Math.abs(p.entry_price-(p.sl_orig||p.sl_price));
+            if(slD>0){
+              fR=p.direction==='LONG'?(cur-p.entry_price)/slD:(p.entry_price-cur)/slD;
+              fUsd=(p.risk_usd||1000)*fR+(p.partial_pnl_usd||0);
+              fR+=(p.partial_pnl_r||0);
+            }
+          }
+          const fc=fR==null?C.muted:fR>=0?C.green:C.red;
+          const sc=STATUS_COLOR[p.status]||C.muted;
+          const isClosing=closingId===p.id;
+          return(
+            <tr key={p.id} className="tr-hover" style={{borderBottom:`1px solid ${C.border}`,background:'transparent',transition:'background .1s'}}>
+              <td style={{padding:'9px 11px',fontWeight:700}}>{p.symbol}</td>
+              <td style={{padding:'9px 11px'}}><Pill color={dc}>{p.direction}</Pill></td>
+              <td style={{padding:'9px 11px',color:C.sub,fontFamily:'monospace'}}>{p.lot_size?.toFixed?.(2)||'—'}</td>
+              <td style={{padding:'9px 11px',fontFamily:'monospace',textAlign:'right'}}>{fmtNum(p.entry_price)}</td>
+              <td style={{padding:'9px 11px',fontFamily:'monospace',textAlign:'right',color:C.red}}>
+                {fmtNum(p.sl_price)}
+                {p.sl_moved_to_be&&<span style={{color:C.teal,fontSize:9,marginLeft:3}}>BE</span>}
+                {p.trailing_activated&&<span style={{color:C.purple,fontSize:9,marginLeft:3}}>🔒</span>}
+              </td>
+              <td style={{padding:'9px 11px',fontFamily:'monospace',textAlign:'right',color:C.green}}>
+                {fmtNum(p.tp1_price)}{p.tp1_hit&&<span style={{color:C.teal,fontSize:9,marginLeft:3}}>✓</span>}
+              </td>
+              <td style={{padding:'9px 11px',fontFamily:'monospace',textAlign:'right',color:C.green}}>{fmtNum(p.tp2_price)}</td>
+              <td style={{padding:'9px 11px',fontFamily:'monospace',textAlign:'right',color:cur?C.text:C.muted}}>{cur?fmtNum(cur):<span className="pulse">…</span>}</td>
+              <td style={{padding:'9px 11px',textAlign:'right',fontWeight:700,color:fc}}>
+                {fUsd!=null?<>{fmtUsd(fUsd)}<span style={{fontWeight:400,fontSize:10,marginLeft:3}}>{fmtR(fR)}</span></>:'—'}
+              </td>
+              <td style={{padding:'9px 11px',color:C.sub,fontFamily:'monospace'}}>${(p.risk_usd||0).toFixed(0)}</td>
+              <td style={{padding:'9px 11px'}}>{p.correlation_tag?<Pill color={C.purple}>{p.correlation_tag}</Pill>:<span style={{color:C.muted}}>—</span>}</td>
+              <td style={{padding:'9px 11px'}}>
+                <div style={{display:'flex',alignItems:'center',gap:5}}>
+                  <span className="blink" style={{width:5,height:5,borderRadius:'50%',background:sc,flexShrink:0}}/>
+                  <Pill color={sc}>{p.status.replace('_',' ')}</Pill>
+                </div>
+              </td>
+              <td style={{padding:'9px 11px',color:C.muted,whiteSpace:'nowrap'}}>{timeAgo(p.opened_at)}</td>
+              <td style={{padding:'9px 11px'}}>
+                <Btn small variant="danger" onClick={()=>onClose(p)} disabled={isClosing}>
+                  {isClosing?<span className="spin">⟳</span>:'✕'}
+                </Btn>
+              </td>
+            </tr>
+          );
+        })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Closed Positions ──────────────────────────────────────────────────────────
+function HistoryTable({positions}){
+  const closed=positions.filter(p=>p.closed_at).sort((a,b)=>new Date(b.closed_at)-new Date(a.closed_at));
+  if(!closed.length) return <div style={{textAlign:'center',padding:'44px',color:C.muted}}><div style={{fontSize:36,marginBottom:10}}>📜</div><div style={{fontSize:14}}>No closed trades yet</div></div>;
+  const wins=closed.filter(p=>(+p.pnl_r||0)>0).length;
+  const totalR=closed.reduce((s,p)=>s+(+p.pnl_r||0),0);
+  const TH=({ch})=><th style={{padding:'7px 11px',color:C.muted,fontWeight:600,fontSize:10,textAlign:'left',textTransform:'uppercase',letterSpacing:'.05em',whiteSpace:'nowrap'}}>{ch}</th>;
+  return(
+    <div>
+      <div style={{display:'flex',gap:16,padding:'10px 14px',background:'rgba(255,255,255,.025)',borderRadius:10,marginBottom:14,flexWrap:'wrap'}}>
+        {[
+          {l:'Trades',v:closed.length,c:C.sub},
+          {l:'Win Rate',v:`${(wins/closed.length*100).toFixed(0)}%`,c:wins/closed.length>=.5?C.green:C.red},
+          {l:'Total R',v:fmtR(totalR),c:totalR>=0?C.green:C.red},
+          {l:'Total P&L',v:fmtUsd(closed.reduce((s,p)=>s+(+p.pnl_usd||0),0)),c:totalR>=0?C.green:C.red},
+        ].map((x,i)=>(
+          <span key={i} style={{color:C.sub,fontSize:12}}>{x.l}: <strong style={{color:x.c}}>{x.v}</strong></span>
+        ))}
+      </div>
+      <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+          <thead><tr style={{borderBottom:`1px solid ${C.border}`}}>
+            <TH ch="Symbol"/><TH ch="Dir"/><TH ch="Entry"/><TH ch="Close"/><TH ch="P&L R"/><TH ch="P&L $"/>
+            <TH ch="Lot"/><TH ch="MFE"/><TH ch="MAE"/><TH ch="Status"/><TH ch="Closed"/><TH ch="Duration"/>
+          </tr></thead>
+          <tbody>
+          {closed.map(p=>{
+            const dc=p.direction==='LONG'?C.green:C.red;
+            const pc=(+p.pnl_r||0)>=0?C.green:C.red;
+            const sc=STATUS_COLOR[p.status]||C.muted;
+            const durH=p.closed_at&&p.opened_at?Math.floor((new Date(p.closed_at)-new Date(p.opened_at))/3600000):null;
+            return(
+              <tr key={p.id} className="tr-hover" style={{borderBottom:`1px solid ${C.border}`}}>
+                <td style={{padding:'9px 11px',fontWeight:700}}>{p.symbol}</td>
+                <td style={{padding:'9px 11px'}}><Pill color={dc}>{p.direction}</Pill></td>
+                <td style={{padding:'9px 11px',fontFamily:'monospace'}}>{fmtNum(p.entry_price)}</td>
+                <td style={{padding:'9px 11px',fontFamily:'monospace'}}>{fmtNum(p.close_price)}</td>
+                <td style={{padding:'9px 11px',fontWeight:700,color:pc}}>{fmtR(p.pnl_r)}</td>
+                <td style={{padding:'9px 11px',fontWeight:700,color:pc}}>{fmtUsd(p.pnl_usd)}</td>
+                <td style={{padding:'9px 11px',fontFamily:'monospace',color:C.sub}}>{p.lot_size?.toFixed?.(2)||'—'}</td>
+                <td style={{padding:'9px 11px',color:C.green}}>{p.mfe!=null?`+${(+p.mfe).toFixed(2)}R`:'—'}</td>
+                <td style={{padding:'9px 11px',color:C.red}}>{p.mae!=null?`-${(+p.mae).toFixed(2)}R`:'—'}</td>
+                <td style={{padding:'9px 11px'}}><Pill color={sc}>{p.status.replace('_',' ')}</Pill></td>
+                <td style={{padding:'9px 11px',color:C.muted,whiteSpace:'nowrap',fontSize:11}}>{fmtTime(p.closed_at)}</td>
+                <td style={{padding:'9px 11px',color:C.muted,fontSize:11}}>{durH!=null?`${durH}h`:'—'}</td>
+              </tr>
+            );
+          })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Execution Log ─────────────────────────────────────────────────────────────
+function ExecLog({logs}){
+  if(!logs.length) return <div style={{textAlign:'center',padding:'44px',color:C.muted}}><div style={{fontSize:36,marginBottom:10}}>📝</div><div>No execution log entries yet</div></div>;
+  const TH=({ch})=><th style={{padding:'7px 11px',color:C.muted,fontWeight:600,fontSize:10,textAlign:'left',textTransform:'uppercase',letterSpacing:'.05em',whiteSpace:'nowrap'}}>{ch}</th>;
+  return(
+    <div style={{overflowX:'auto'}}>
+      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+        <thead><tr style={{borderBottom:`1px solid ${C.border}`}}>
+          <TH ch="Time"/><TH ch="Symbol"/><TH ch="Dir"/><TH ch="Action"/><TH ch="Conf"/><TH ch="Lot"/><TH ch="Risk $"/><TH ch="Reason"/>
+        </tr></thead>
+        <tbody>
+        {logs.map(lg=>{
+          const ac=ACTION_COLOR[lg.action]||C.sub;
+          const dc=lg.direction==='LONG'?C.green:lg.direction==='SHORT'?C.red:C.muted;
+          return(
+            <tr key={lg.id} className="tr-hover" style={{borderBottom:`1px solid ${C.border}`}}>
+              <td style={{padding:'8px 11px',color:C.muted,whiteSpace:'nowrap',fontSize:11}}>{fmtTime(lg.created_at)}</td>
+              <td style={{padding:'8px 11px',fontWeight:700}}>{lg.symbol}</td>
+              <td style={{padding:'8px 11px'}}>{lg.direction?<Pill color={dc}>{lg.direction}</Pill>:'—'}</td>
+              <td style={{padding:'8px 11px'}}><Pill color={ac}>{lg.action.replace(/_/g,' ')}</Pill></td>
+              <td style={{padding:'8px 11px',color:C.sub}}>{lg.confidence!=null?`${lg.confidence}%`:'—'}</td>
+              <td style={{padding:'8px 11px',fontFamily:'monospace',color:C.sub}}>{lg.lot_size?.toFixed?.(2)||'—'}</td>
+              <td style={{padding:'8px 11px',color:C.sub}}>{lg.risk_usd?`$${(+lg.risk_usd).toFixed(0)}`:'—'}</td>
+              <td style={{padding:'8px 11px',color:C.muted,fontSize:11,maxWidth:300,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{lg.reason}</td>
+            </tr>
+          );
+        })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Bot Memory ────────────────────────────────────────────────────────────────
+function MemoryCard({entry,isLatest}){
+  const[open,setOpen]=useState(isLatest);
+  const meta=SESSION_META[entry.session_type]||SESSION_META.adhoc;
+  const trades=entry.trades_placed||[];
+  const sigs=entry.signals_found||[];
+  const actionable=sigs.filter(s=>s.state==='LONG_NOW'||s.state==='SHORT_NOW'||s.verdict==='LONG_NOW'||s.verdict==='SHORT_NOW');
+  return(
+    <div className="anim" style={{background:C.surf,border:`1px solid ${isLatest?meta.color+'40':C.border}`,borderRadius:13,overflow:'hidden'}}>
+      <div onClick={()=>setOpen(e=>!e)} style={{padding:'13px 17px',cursor:'pointer',display:'flex',alignItems:'center',gap:10,borderBottom:open?`1px solid ${C.border}`:'none'}}>
+        <span style={{fontSize:17}}>{meta.icon}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap'}}>
+            <span style={{fontWeight:700,fontSize:13,color:meta.color}}>{meta.label}</span>
+            {isLatest&&<Pill color={meta.color}>LATEST</Pill>}
+            {actionable.length>0&&<Pill color={C.green}>{actionable.length} TRADE{actionable.length>1?'S':''}</Pill>}
+            {trades.length>0&&<Pill color={C.teal}>{trades.length} OPENED</Pill>}
+          </div>
+          <div style={{color:C.muted,fontSize:11,marginTop:2}}>{fmtTime(entry.run_at)} · {timeAgo(entry.run_at)}</div>
+        </div>
+        <span style={{color:C.muted,fontSize:11,transform:open?'rotate(180deg)':'none',transition:'transform .2s'}}>▼</span>
+      </div>
+      {open&&(
+        <div style={{padding:'13px 17px'}}>
+          {entry.market_notes&&<div style={{marginBottom:10,padding:'9px 13px',background:'rgba(255,255,255,.025)',borderRadius:8,borderLeft:`3px solid ${meta.color}`,fontSize:13,color:C.text,lineHeight:1.6}}>{entry.market_notes}</div>}
+          {trades.length>0&&<div style={{marginBottom:10}}>
+            <div style={{color:C.muted,fontSize:10,fontWeight:600,textTransform:'uppercase',letterSpacing:'.06em',marginBottom:6}}>Trades ({trades.length})</div>
+            {trades.map((t,i)=>{const tc=t.direction==='LONG'?C.green:C.red;return(
+              <div key={i} style={{display:'flex',gap:10,padding:'7px 11px',borderRadius:7,background:`${tc}08`,border:`1px solid ${tc}20`,marginBottom:4,flexWrap:'wrap',fontSize:12}}>
+                <span style={{color:tc,fontWeight:700}}>{t.direction==='LONG'?'▲':'▼'} {t.symbol}</span>
+                {t.entry_price&&<span style={{color:C.sub}}>@ {fmtNum(t.entry_price)}</span>}
+                {t.lot_size&&<span style={{color:C.muted}}>lot {(+t.lot_size).toFixed(2)}</span>}
+                {t.risk_usd&&<span style={{color:C.muted}}>risk ${(+t.risk_usd).toFixed(0)}</span>}
+              </div>
+            );})}
+          </div>}
+          {entry.lessons_learned&&<div style={{color:C.muted,fontSize:12,lineHeight:1.5}}>{entry.lessons_learned}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Settings Panel ────────────────────────────────────────────────────────────
+function SettingsPanel({settings,onSave,saving}){
+  const[loc,setLoc]=useState(null);
+  useEffect(()=>{if(settings)setLoc({...settings});},[settings]);
+  if(!loc) return <div style={{color:C.muted,padding:20}}>Loading settings…</div>;
+  const numField=(key,label,min,max,step,hint)=>(
+    <div key={key} style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:12,padding:15}}>
+      <label style={{color:C.sub,fontSize:11,fontWeight:600,display:'block',marginBottom:6}}>{label}</label>
+      <input type="number" value={loc[key]??''} min={min} max={max} step={step}
+        onChange={e=>setLoc(l=>({...l,[key]:e.target.value}))}
+        style={{width:'100%',background:'rgba(255,255,255,.06)',border:`1px solid ${C.border}`,borderRadius:8,padding:'7px 11px',color:C.text,fontSize:15,fontWeight:700}}/>
+      <div style={{color:C.muted,fontSize:10,marginTop:4}}>{hint}</div>
+    </div>
+  );
+  const boolField=(key,label,hint)=>(
+    <div key={key} style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:12,padding:15}}>
+      <label style={{color:C.sub,fontSize:11,fontWeight:600,display:'block',marginBottom:10}}>{label}</label>
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <input type="checkbox" checked={!!loc[key]} onChange={e=>setLoc(l=>({...l,[key]:e.target.checked}))} style={{width:18,height:18}}/>
+        <span style={{color:loc[key]?C.green:C.muted,fontSize:13,fontWeight:600}}>{loc[key]?'Enabled':'Disabled'}</span>
+      </div>
+      <div style={{color:C.muted,fontSize:10,marginTop:6}}>{hint}</div>
+    </div>
+  );
+  return(
+    <div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:14,marginBottom:18}}>
+        {numField('risk_pct','Risk per Trade (%)','0.1','5','0.1','% of account balance risked per trade')}
+        {numField('daily_loss_limit_pct','Daily Loss Limit (%)','0.5','10','0.5','Kill-switch triggers when daily loss ≥ this %')}
+        {numField('max_open_positions','Max Open Positions','1','10','1','Max simultaneous open paper trades')}
+        {numField('confidence_threshold','Min Confidence (%)','50','95','1','Minimum signal confidence to open a trade')}
+        {numField('trailing_atr_mult','Trailing ATR Multiplier','0.5','3','0.1','Trailing stop activates at +N × ATR profit')}
+        {numField('partial_close_pct','Partial Close at TP1 (%)','10','90','5','% of position closed at TP1 (SL → BE after)')}
+        {boolField('correlation_guard','Correlation Guard','Blocks correlated positions (e.g. Long XAU + Long EUR — both bearish USD)')}
+      </div>
+      <Btn variant="primary" onClick={()=>onSave(loc)} disabled={saving}>
+        {saving?<><span className="spin">⟳</span> Saving…</>:'💾 Save Settings'}
+      </Btn>
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function App(){
+  const[tab,setTab]=useState('monitor');
+  const[account,setAccount]=useState(null);
+  const[settings,setSettings]=useState(null);
+  const[positions,setPositions]=useState([]);
+  const[memory,setMemory]=useState([]);
+  const[snapshots,setSnapshots]=useState([]);
+  const[execLog,setExecLog]=useState([]);
+  const[prices,setPrices]=useState({});
+  const[loading,setLoading]=useState(true);
+  const[rtStatus,setRtStatus]=useState('connecting'); // connecting | live | error
+  const[running,setRunning]=useState(false);
+  const[updatingPos,setUpdatingPos]=useState(false);
+  const[savingSettings,setSavingSettings]=useState(false);
+  const[togglingPause,setTogglingPause]=useState(false);
+  const[resettingKS,setResettingKS]=useState(false);
+  const[closingAll,setClosingAll]=useState(false);
+  const[closingId,setClosingId]=useState(null);
+  const[runResult,setRunResult]=useState(null);
+  const[lastRefresh,setLastRefresh]=useState(null);
+  const channelRef=useRef(null);
+
+  // ── Fetch functions ─────────────────────────────────────────────────────────
+  const fetchAccount=useCallback(async()=>{
+    try{
+      const d=await api('paper_account?id=eq.1&select=*',{headers:{'Accept':'application/vnd.pgrst.object+json'}});
+      setAccount(d);
+    }catch(e){console.warn('fetchAccount',e.message);}
+  },[]);
+
+  const fetchSettings=useCallback(async()=>{
+    try{
+      const d=await api('bot_settings?id=eq.1&select=*',{headers:{'Accept':'application/vnd.pgrst.object+json'}});
+      setSettings(d);
+    }catch(e){console.warn('fetchSettings',e.message);}
+  },[]);
+
+  const fetchPositions=useCallback(async()=>{
+    try{
+      const d=await api('paper_positions?order=opened_at.desc&limit=150&select=*');
+      setPositions(d||[]);
+    }catch(e){console.warn('fetchPositions',e.message);}
+  },[]);
+
+  const fetchMemory=useCallback(async()=>{
+    try{
+      const d=await api('bot_memory?order=run_at.desc&limit=20&select=*');
+      setMemory(d||[]);
+    }catch(e){console.warn('fetchMemory',e.message);}
+  },[]);
+
+  const fetchSnapshots=useCallback(async()=>{
+    try{
+      const d=await api('equity_snapshots?order=created_at.asc&limit=200&select=*');
+      setSnapshots(d||[]);
+    }catch(e){console.warn('fetchSnapshots',e.message);}
+  },[]);
+
+  const fetchExecLog=useCallback(async()=>{
+    try{
+      const d=await api('execution_log?order=created_at.desc&limit=100&select=*');
+      setExecLog(d||[]);
+    }catch(e){console.warn('fetchExecLog',e.message);}
+  },[]);
+
+  const load=useCallback(async()=>{
+    await Promise.all([fetchAccount(),fetchSettings(),fetchPositions(),fetchMemory(),fetchSnapshots(),fetchExecLog()]);
+    setLastRefresh(new Date());
+    setLoading(false);
+  },[fetchAccount,fetchSettings,fetchPositions,fetchMemory,fetchSnapshots,fetchExecLog]);
+
+  // ── Initial load + 30s polling ──────────────────────────────────────────────
+  useEffect(()=>{
+    load();
+    const iv=setInterval(load,30_000);
+    return()=>clearInterval(iv);
+  },[load]);
+
+  // ── Supabase Realtime ───────────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!sbClient) return;
+    const ch=sbClient.channel('bot-monitor-v3')
+      .on('postgres_changes',{event:'*',schema:'public',table:'paper_account',filter:'id=eq.1'},(payload)=>{
+        if(payload.new) setAccount(prev=>({...prev,...payload.new}));
+      })
+      .on('postgres_changes',{event:'*',schema:'public',table:'paper_positions'},(payload)=>{
+        fetchPositions();
+      })
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'equity_snapshots'},(payload)=>{
+        if(payload.new) setSnapshots(prev=>[...prev,payload.new]);
+      })
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'execution_log'},(payload)=>{
+        if(payload.new) setExecLog(prev=>[payload.new,...prev].slice(0,100));
+      })
+      .subscribe((status)=>{
+        setRtStatus(status==='SUBSCRIBED'?'live':status==='CHANNEL_ERROR'?'error':'connecting');
+      });
+    channelRef.current=ch;
+    return()=>{sbClient.removeChannel(ch);};
+  },[fetchPositions]);
+
+  // ── Live prices for open positions ──────────────────────────────────────────
+  useEffect(()=>{
+    const open=positions.filter(p=>p.status==='OPEN'||p.status==='TP1_HIT');
+    if(!open.length) return;
+    const YF={'XAU/USD':'GC=F','NAS100':'NQ=F','EUR/USD':'EURUSD=X','GBP/USD':'GBPUSD=X','GBP/JPY':'GBPJPY=X','EUR/JPY':'EURJPY=X','USD/JPY':'JPY=X','BTC/USD':'BTC-USD','ETH/USD':'ETH-USD','BTCUSDT':'BTC-USD','ETHUSDT':'ETH-USD','XAUUSD':'GC=F','EURUSD':'EURUSD=X','GBPUSD':'GBPUSD=X','USDJPY':'JPY=X'};
+    const syms=[...new Set(open.map(p=>p.symbol))];
+    syms.forEach(async sym=>{
+      try{
+        const t=YF[sym]||sym;
+        const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t)}?interval=1m&range=1d`,{headers:{'User-Agent':'Mozilla/5.0'}});
+        if(!r.ok) return;
+        const j=await r.json();
+        const price=j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+        if(price) setPrices(prev=>({...prev,[sym]:price}));
+      }catch(_){}
+    });
+  },[positions]);
+
+  // ── Actions ─────────────────────────────────────────────────────────────────
+  const togglePause=async()=>{
+    if(!settings) return;
+    setTogglingPause(true);
+    try{
+      const v=!settings.is_paused;
+      await api('bot_settings?id=eq.1',{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({is_paused:v,updated_at:new Date().toISOString()})});
+      setSettings(s=>({...s,is_paused:v}));
+    }catch(e){console.error(e);}
+    setTogglingPause(false);
+  };
+
+  const resetKillSwitch=async()=>{
+    setResettingKS(true);
+    try{
+      const now=new Date().toISOString();
+      await Promise.all([
+        api('paper_account?id=eq.1',{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({kill_switch_active:false,kill_switch_reason:null,kill_switch_at:null,updated_at:now})}),
+        api('bot_settings?id=eq.1',{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({is_paused:false,updated_at:now})}),
+      ]);
+      await load();
+    }catch(e){console.error(e);}
+    setResettingKS(false);
+  };
+
+  const saveSettings=async(vals)=>{
+    setSavingSettings(true);
+    try{
+      const payload={
+        risk_pct:+vals.risk_pct,daily_loss_limit_pct:+vals.daily_loss_limit_pct,
+        max_open_positions:+vals.max_open_positions,confidence_threshold:+vals.confidence_threshold,
+        trailing_atr_mult:+vals.trailing_atr_mult,partial_close_pct:+vals.partial_close_pct,
+        correlation_guard:!!vals.correlation_guard,
+        updated_at:new Date().toISOString(),
+      };
+      await api('bot_settings?id=eq.1',{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify(payload)});
+      setSettings(s=>({...s,...payload}));
+    }catch(e){console.error(e);}
+    setSavingSettings(false);
+  };
+
+  const triggerRun=async()=>{
+    setRunning(true);setRunResult(null);
+    try{
+      const r=await fetch(`${FN_URL}/auto-analyze`,{method:'POST',headers:{...SB_HDR},body:JSON.stringify({session:'adhoc'})});
+      const d=await r.json();
+      setRunResult({ok:r.ok,d});
+      setTimeout(()=>{load();setRunResult(null);},3000);
+    }catch(e){setRunResult({ok:false,d:{error:e.message}});}
+    setRunning(false);
+  };
+
+  const triggerPosUpdate=async()=>{
+    setUpdatingPos(true);
+    try{
+      await fetch(`${FN_URL}/update-paper-positions`,{method:'POST',headers:{...SB_HDR},body:'{}'});
+      await new Promise(r=>setTimeout(r,2000));
+      await load();
+    }catch(e){console.error(e);}
+    setUpdatingPos(false);
+  };
+
+  const closePosition=async(pos)=>{
+    if(!confirm(`Close ${pos.direction} ${pos.symbol} at entry (0 P&L)?`)) return;
+    setClosingId(pos.id);
+    try{
+      const now=new Date().toISOString();
+      await api(`paper_positions?id=eq.${pos.id}`,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({
+        status:'MANUAL_CLOSE',close_price:pos.entry_price,closed_at:now,
+        pnl_usd:pos.partial_pnl_usd||0,pnl_r:pos.partial_pnl_r||0,
+        notes:(pos.notes?pos.notes+' | ':'')+`Manual close by user`,
+      })});
+      await fetchPositions();
+    }catch(e){console.error(e);}
+    setClosingId(null);
+  };
+
+  const emergencyCloseAll=async()=>{
+    const open=positions.filter(p=>p.status==='OPEN'||p.status==='TP1_HIT');
+    if(!open.length) return;
+    if(!confirm(`⚠️ Emergency close ALL ${open.length} open position(s)? This cannot be undone.`)) return;
+    setClosingAll(true);
+    try{
+      const now=new Date().toISOString();
+      await Promise.all(open.map(p=>api(`paper_positions?id=eq.${p.id}`,{method:'PATCH',headers:{'Prefer':'return=minimal'},body:JSON.stringify({
+        status:'MANUAL_CLOSE',close_price:p.entry_price,closed_at:now,
+        pnl_usd:p.partial_pnl_usd||0,pnl_r:p.partial_pnl_r||0,
+        notes:(p.notes?p.notes+' | ':'')+`Emergency close by user`,
+      })})));
+      await fetchPositions();
+    }catch(e){console.error(e);}
+    setClosingAll(false);
+  };
+
+  // ── Derived state ───────────────────────────────────────────────────────────
+  const openPositions=useMemo(()=>positions.filter(p=>p.status==='OPEN'||p.status==='TP1_HIT'),[positions]);
+  const isPaused=settings?.is_paused;
+  const killActive=account?.kill_switch_active;
+  const balance=+(account?.balance??100000);
+  const equity=+(account?.equity??balance);
+  const dailyPnl=+(account?.daily_pnl_usd??0);
+  const dailyPct=(dailyPnl/balance*100);
+  const nextRun=getNextRun();
+  const tabs=[
+    ['monitor','📊 Monitor'],
+    ['positions',`📋 Positions${openPositions.length?` (${openPositions.length})`:''}`,],
+    ['history','📜 History'],
+    ['log','⚡ Exec Log'],
+    ['memory','🧠 Memory'],
+    ['settings','⚙️ Settings'],
+  ];
+
+  return(
+    <div style={{minHeight:'100vh',background:C.bg}}>
+      {/* ── Nav ── */}
+      <nav style={{borderBottom:`1px solid ${C.border}`,padding:'0 26px',background:'rgba(6,7,16,.95)',position:'sticky',top:0,zIndex:100,backdropFilter:'blur(14px)'}}>
+        <div style={{maxWidth:1380,margin:'0 auto',display:'flex',alignItems:'center',height:56,gap:18}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,flexShrink:0}}>
+            <div style={{width:28,height:28,borderRadius:8,background:'linear-gradient(135deg,#818CF8,#34D399)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,color:'#fff'}}>P</div>
+            <span style={{fontWeight:800,fontSize:14}}>PropPilot</span>
+            <span style={{color:C.muted}}>/</span>
+            <span style={{color:C.sub,fontSize:13}}>Bot</span>
+          </div>
+          {/* Status row */}
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            {killActive?(
+              <div style={{display:'flex',alignItems:'center',gap:5,padding:'3px 9px',borderRadius:100,background:'rgba(248,113,113,.12)',border:'1px solid rgba(248,113,113,.35)'}}>
+                <span className="blink" style={{width:5,height:5,borderRadius:'50%',background:C.red}}/>
+                <span style={{fontSize:10,fontWeight:700,color:C.red}}>KILL-SWITCH</span>
+              </div>
+            ):isPaused?(
+              <div style={{display:'flex',alignItems:'center',gap:5,padding:'3px 9px',borderRadius:100,background:'rgba(248,113,113,.1)',border:'1px solid rgba(248,113,113,.25)'}}>
+                <span style={{fontSize:10,fontWeight:700,color:C.red}}>⏸ PAUSED</span>
+              </div>
+            ):(
+              <div style={{display:'flex',alignItems:'center',gap:5,padding:'3px 9px',borderRadius:100,background:'rgba(52,211,153,.08)',border:'1px solid rgba(52,211,153,.22)'}}>
+                <span className="blink" style={{width:5,height:5,borderRadius:'50%',background:C.green}}/>
+                <span style={{fontSize:10,fontWeight:700,color:C.green}}>LIVE</span>
+              </div>
+            )}
+            {/* Realtime indicator */}
+            <div style={{display:'flex',alignItems:'center',gap:4,padding:'3px 8px',borderRadius:100,background:'rgba(255,255,255,.04)',border:`1px solid ${C.border}`}}>
+              <span style={{width:5,height:5,borderRadius:'50%',background:rtStatus==='live'?C.teal:rtStatus==='error'?C.red:C.amber,display:'inline-block'}}/>
+              <span style={{fontSize:9,fontWeight:700,color:C.muted,letterSpacing:'.03em'}}>{rtStatus==='live'?'REALTIME':rtStatus==='error'?'RT ERR':'RT …'}</span>
+            </div>
+            <div style={{fontSize:11,color:C.muted,display:'flex',gap:4}}>
+              <span>Next:</span>
+              <strong style={{color:C.sub}}>{nextRun.label}</strong>
+              <span>in</span>
+              <strong style={{color:C.text}}>{nextRun.in}</strong>
+            </div>
+          </div>
+          <div style={{marginLeft:'auto',display:'flex',gap:7,alignItems:'center'}}>
+            {lastRefresh&&<span style={{color:C.muted,fontSize:10}}>↻ {timeAgo(lastRefresh.toISOString())}</span>}
+            <a href="live.html" style={{color:C.muted,fontSize:11,textDecoration:'none',padding:'4px 9px',borderRadius:7,background:C.surf,border:`1px solid ${C.border}`}}>Live</a>
+            <a href="analytics.html" style={{color:C.muted,fontSize:11,textDecoration:'none',padding:'4px 9px',borderRadius:7,background:C.surf,border:`1px solid ${C.border}`}}>Analytics</a>
+          </div>
+        </div>
+      </nav>
+
+      <div style={{maxWidth:1380,margin:'0 auto',padding:'26px 22px'}}>
+        {loading?(
+          <div style={{textAlign:'center',padding:'80px 0',color:C.muted}}>
+            <div className="spin" style={{fontSize:26,marginBottom:12}}>⟳</div>
+            <div style={{fontSize:14}}>Loading bot data…</div>
+          </div>
+        ):(
+          <>
+            {/* Kill-switch banner */}
+            <KillSwitchBanner account={account} onReset={resetKillSwitch} resetting={resettingKS}/>
+
+            {/* Header + actions */}
+            <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:22,flexWrap:'wrap',gap:12}}>
+              <div>
+                <h1 style={{fontSize:24,fontWeight:900,marginBottom:3}}>🤖 Bot Monitor <span style={{fontSize:14,fontWeight:500,color:C.muted}}>Phase 3</span></h1>
+                <p style={{color:C.muted,fontSize:12}}>Paper trading engine · Supabase Realtime · ATR sizing · Kill-switch protection</p>
+              </div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+                <Btn variant="amber" onClick={triggerPosUpdate} disabled={updatingPos}>
+                  {updatingPos?<><span className="spin">⟳</span> Checking…</>:'🔄 Check Positions'}
+                </Btn>
+                <Btn variant={isPaused?'success':'danger'} onClick={togglePause} disabled={togglingPause}>
+                  {isPaused?'▶ Resume Bot':'⏸ Pause Bot'}
+                </Btn>
+                <Btn variant="primary" onClick={triggerRun} disabled={running||isPaused||killActive} style={{minWidth:120}}>
+                  {running?<><span className="spin">⟳</span> Analysing…</>:'▶ Run Analysis'}
+                </Btn>
+                {openPositions.length>0&&(
+                  <Btn variant="danger" onClick={emergencyCloseAll} disabled={closingAll}>
+                    {closingAll?<><span className="spin">⟳</span> Closing…</>:'🚨 Emergency Close All'}
+                  </Btn>
+                )}
+              </div>
+            </div>
+
+            {/* Run result */}
+            {runResult&&(
+              <div className="anim" style={{padding:'9px 13px',borderRadius:9,marginBottom:14,background:runResult.ok?'rgba(52,211,153,.07)':'rgba(248,113,113,.07)',border:`1px solid ${runResult.ok?'#34D39930':'#F8717130'}`,fontSize:12}}>
+                {runResult.ok
+                  ?<span style={{color:C.green}}>✓ Analysis complete · {runResult.d.signals_saved??0} signals · {runResult.d.trades_opened??0} trades opened</span>
+                  :<span style={{color:C.red}}>✗ Error: {runResult.d.error||JSON.stringify(runResult.d)}</span>}
+              </div>
+            )}
+
+            {/* KPI row */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(155px,1fr))',gap:11,marginBottom:22}}>
+              <KpiCard icon="💰" label="Balance" value={`$${balance.toLocaleString('en-US',{maximumFractionDigits:0})}`} sub={`${account?.total_trades||0} closed trades`} color={balance>=100000?C.green:C.red} glow={balance>=100000}/>
+              <KpiCard icon="📊" label="Equity" value={`$${equity.toLocaleString('en-US',{maximumFractionDigits:0})}`} sub={`Open P&L: ${fmtUsd(equity-balance)}`} color={equity>=100000?C.green:C.red}/>
+              <KpiCard icon="📅" label="Today P&L" value={fmtUsd(dailyPnl)} sub={`${fmtPct(dailyPct)} · limit: ${settings?.daily_loss_limit_pct||2}%`} color={pnlColor(dailyPnl)} glow={dailyPnl<0&&Math.abs(dailyPct)>=(+(settings?.daily_loss_limit_pct||2)*0.7)}/>
+              <KpiCard icon="🎯" label="Win Rate" value={account?.win_rate_pct!=null?`${(+account.win_rate_pct).toFixed(0)}%`:'—'} sub={`${account?.win_trades||0}W / ${account?.loss_trades||0}L`} color={+(account?.win_rate_pct||0)>=50?C.green:C.red}/>
+              <KpiCard icon="📈" label="Avg R" value={account?.avg_pnl_r!=null?fmtR(account.avg_pnl_r):'—'} sub="per closed trade" color={+(account?.avg_pnl_r||0)>=0?C.green:C.red}/>
+              <KpiCard icon="🛡️" label="Max Drawdown" value={account?.max_drawdown!=null?`${(+account.max_drawdown).toFixed(1)}%`:'—'} sub={`Peak $${((+account?.peak_balance||100000)/1000).toFixed(0)}k`} color={+(account?.max_drawdown||0)>10?C.red:C.amber}/>
+              <KpiCard icon="📋" label="Open" value={openPositions.length} sub={`Max ${settings?.max_open_positions||3} · today ${account?.daily_trades||0} trades`} color={openPositions.length>0?C.amber:C.text}/>
+              <KpiCard icon="⚡" label="Profit Factor" value={account?.profit_factor!=null?(+account.profit_factor).toFixed(2):'—'} sub="gross wins / gross losses" color={+(account?.profit_factor||0)>=1?C.green:C.red}/>
+            </div>
+
+            {/* Tabs */}
+            <div style={{display:'flex',gap:3,marginBottom:18,background:'rgba(255,255,255,.025)',borderRadius:11,padding:3,width:'fit-content',flexWrap:'wrap'}}>
+              {tabs.map(([t,l])=>(
+                <button key={t} onClick={()=>setTab(t)} style={{padding:'7px 14px',borderRadius:8,fontSize:12,fontWeight:600,background:tab===t?'rgba(255,255,255,.09)':'transparent',color:tab===t?C.text:C.muted,border:'none',cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
+            {/* ── MONITOR TAB ── */}
+            {tab==='monitor'&&(
+              <div style={{display:'grid',gap:18}}>
+                {/* Equity curve */}
+                <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:16,padding:'18px 22px'}}>
+                  <div style={{color:C.sub,fontSize:12,fontWeight:700,marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                    <span>📈 Equity Curve</span>
+                    <span style={{color:C.muted,fontSize:11,fontWeight:400}}>{snapshots.length} snapshots · updated by cron / close events</span>
+                  </div>
+                  <EquityCurve snapshots={snapshots} startBal={100000}/>
+                </div>
+                {/* Daily risk bar */}
+                {account&&(
+                  <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:16,padding:'16px 22px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:10}}>
+                      <span style={{color:C.sub,fontSize:12,fontWeight:700}}>📉 Daily Loss Meter</span>
+                      <span style={{fontSize:12,fontWeight:700,color:pnlColor(dailyPnl)}}>{fmtUsd(dailyPnl)} ({fmtPct(dailyPct)})</span>
+                    </div>
+                    {(()=>{
+                      const limit=+(settings?.daily_loss_limit_pct||2);
+                      const usedPct=dailyPnl<0?Math.min(Math.abs(dailyPct)/limit*100,100):0;
+                      const barCol=usedPct>=80?C.red:usedPct>=50?C.amber:C.green;
+                      return(
+                        <div>
+                          <div style={{height:10,borderRadius:100,background:'rgba(255,255,255,.06)',overflow:'hidden'}}>
+                            <div style={{height:'100%',width:`${usedPct}%`,borderRadius:100,background:barCol,transition:'width .4s ease'}}/>
+                          </div>
+                          <div style={{display:'flex',justifyContent:'space-between',marginTop:6,fontSize:10,color:C.muted}}>
+                            <span>$0</span>
+                            <span style={{color:barCol}}>{usedPct.toFixed(0)}% of limit used</span>
+                            <span>-${(balance*limit/100).toFixed(0)} ({limit}%)</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+                {/* Risk & settings summary */}
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:10}}>
+                  {settings&&[
+                    {l:'Risk / Trade',v:`${settings.risk_pct||1}% = $${(balance*(+(settings.risk_pct||1))/100).toFixed(0)}`},
+                    {l:'Daily Loss Limit',v:`${settings.daily_loss_limit_pct||2}% = $${(balance*(+(settings.daily_loss_limit_pct||2))/100).toFixed(0)}`},
+                    {l:'Min Confidence',v:`${settings.confidence_threshold||70}%`},
+                    {l:'Trailing Mult',v:`+${settings.trailing_atr_mult||1.5} ATR`},
+                    {l:'Partial Close',v:`${settings.partial_close_pct||50}% at TP1`},
+                    {l:'Corr Guard',v:settings.correlation_guard?'✅ Enabled':'❌ Disabled'},
+                  ].map((x,i)=>(
+                    <div key={i} style={{background:'rgba(255,255,255,.025)',border:`1px solid ${C.border}`,borderRadius:11,padding:'11px 15px'}}>
+                      <div style={{color:C.muted,fontSize:10,marginBottom:3}}>{x.l}</div>
+                      <div style={{color:C.text,fontWeight:700,fontSize:13}}>{x.v}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* Session schedule */}
+                <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:16,padding:'16px 22px'}}>
+                  <div style={{color:C.sub,fontSize:12,fontWeight:700,marginBottom:12}}>📅 Session Schedule (UTC · Mon–Fri)</div>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    {[{h:7,m:0,l:'London Open',col:C.indigo,i:'🇬🇧'},{h:8,m:30,l:'NY Pre-Mkt',col:C.blue,i:'🌅'},{h:13,m:0,l:'NY Open',col:C.green,i:'🇺🇸'},{h:16,m:0,l:'NY Mid',col:C.amber,i:'📊'},{h:20,m:0,l:'Day End',col:C.red,i:'🌙'}].map((s,i)=>{
+                      const nh=new Date().getUTCHours(),nm=new Date().getUTCMinutes();
+                      const now2=nh===s.h&&nm<s.m+(i===1?5:3);
+                      return(
+                        <div key={i} style={{display:'flex',alignItems:'center',gap:7,padding:'7px 12px',borderRadius:9,background:now2?`${s.col}12`:'rgba(255,255,255,.02)',border:`1px solid ${now2?s.col+'35':C.border}`}}>
+                          <span style={{fontSize:15}}>{s.i}</span>
+                          <div><div style={{color:s.col,fontSize:11,fontWeight:700}}>{s.l}</div><div style={{color:C.muted,fontSize:10}}>{String(s.h).padStart(2,'0')}:{String(s.m).padStart(2,'0')} UTC</div></div>
+                          {now2&&<span className="blink" style={{width:5,height:5,borderRadius:'50%',background:s.col,flexShrink:0}}/>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── POSITIONS TAB ── */}
+            {tab==='positions'&&(
+              <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:16,overflow:'hidden'}}>
+                <div style={{padding:'12px 17px',borderBottom:`1px solid ${C.border}`,display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:8}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8}}>
+                    {openPositions.length>0&&<span className="blink" style={{width:7,height:7,borderRadius:'50%',background:C.amber,flexShrink:0}}/>}
+                    <span style={{color:openPositions.length?C.amber:C.muted,fontWeight:700,fontSize:13}}>
+                      {openPositions.length?`${openPositions.length} OPEN POSITION${openPositions.length>1?'S':''}`:  'No open positions'}
+                      {openPositions.length>0&&' · Position manager runs every 5 min'}
+                    </span>
+                  </div>
+                  {openPositions.length>0&&(
+                    <Btn variant="danger" small onClick={emergencyCloseAll} disabled={closingAll}>
+                      {closingAll?<><span className="spin">⟳</span> Closing all…</>:'🚨 Emergency Close All'}
+                    </Btn>
+                  )}
+                </div>
+                <LivePositions positions={openPositions} prices={prices} onClose={closePosition} closingId={closingId}/>
+              </div>
+            )}
+
+            {/* ── HISTORY TAB ── */}
+            {tab==='history'&&(
+              <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:16,overflow:'hidden',padding:16}}>
+                <HistoryTable positions={positions}/>
+              </div>
+            )}
+
+            {/* ── EXEC LOG TAB ── */}
+            {tab==='log'&&(
+              <div style={{background:C.surf,border:`1px solid ${C.border}`,borderRadius:16,overflow:'hidden',padding:16}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+                  <span style={{color:C.sub,fontWeight:700,fontSize:13}}>⚡ Execution Log — every trade open / reject decision</span>
+                  <span style={{color:C.muted,fontSize:11}}>{execLog.length} entries</span>
+                </div>
+                <ExecLog logs={execLog}/>
+              </div>
+            )}
+
+            {/* ── MEMORY TAB ── */}
+            {tab==='memory'&&(
+              <div style={{display:'flex',flexDirection:'column',gap:9}}>
+                {memory.length===0?(
+                  <div style={{textAlign:'center',padding:'60px',color:C.muted}}>
+                    <div style={{fontSize:44,marginBottom:12}}>🧠</div>
+                    <div style={{fontSize:15,fontWeight:600,marginBottom:7}}>No bot memory yet</div>
+                    <div style={{fontSize:12}}>Click "Run Analysis" or wait for the scheduled session</div>
+                  </div>
+                ):memory.map((e,i)=><MemoryCard key={e.id||i} entry={e} isLatest={i===0}/>)}
+              </div>
+            )}
+
+            {/* ── SETTINGS TAB ── */}
+            {tab==='settings'&&(
+              <div>
+                <div style={{marginBottom:18,padding:'13px 17px',borderRadius:12,background:isPaused||killActive?'rgba(248,113,113,.08)':'rgba(52,211,153,.06)',border:`1px solid ${isPaused||killActive?'rgba(248,113,113,.22)':'rgba(52,211,153,.15)'}`}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:14,color:killActive?C.red:isPaused?C.red:C.green,marginBottom:3}}>
+                        {killActive?'🚨 KILL-SWITCH ACTIVE':isPaused?'⏸ Bot Paused':'🟢 Bot Running'}
+                      </div>
+                      <div style={{color:C.muted,fontSize:12}}>
+                        {killActive?`Kill-switch reason: ${account?.kill_switch_reason||'daily loss limit'}`:
+                         isPaused?'No new trades until resumed.':'Paper trading · 5 sessions/day · ATR-based lot sizing'}
+                      </div>
+                    </div>
+                    <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                      {killActive&&<Btn variant="danger" onClick={resetKillSwitch} disabled={resettingKS}>{resettingKS?'Resetting…':'🔓 Reset Kill-Switch'}</Btn>}
+                      <Btn variant={isPaused?'success':'danger'} onClick={togglePause} disabled={togglingPause}>
+                        {isPaused?'▶ Resume Bot':'⏸ Pause Bot'}
+                      </Btn>
+                    </div>
+                  </div>
+                </div>
+                <SettingsPanel settings={settings} onSave={saveSettings} saving={savingSettings}/>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

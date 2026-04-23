@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PropPilot AI — SMC Live Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+
+  <!-- ① Engine modules (global scope, no bundler required) -->
+  <script src="dataProvider.js"></script>
+  <script src="signalEngine.js"></script>
+
+  <!-- ② TradingView Lightweight Charts v4 -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+
+  <!-- ③ React 18 + Babel for JSX -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body {
+      background: #060710;
+      color: #E2E8F0;
+      font-family: 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      font-size: 14px;
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    button, select, input { font-family: inherit; }
+    code, .mono { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+
+    @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    @keyframes spin    { to{transform:rotate(360deg)} }
+    @keyframes slideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes glow    { 0%,100%{box-shadow:0 0 0 0 rgba(245,166,35,.35)} 50%{box-shadow:0 0 0 12px rgba(245,166,35,0)} }
+
+    .spin   { animation: spin 1s linear infinite; }
+    .pulse  { animation: pulse 1.6s ease-in-out infinite; }
+    .anim   { animation: slideUp 0.4s ease forwards; }
+    .glow   { animation: glow 2s ease infinite; }
+
+    /* Chart container */
+    #lwChart { width:100%; height:100%; }
+
+    /* Responsive breakpoints */
+    @media (max-width: 1100px) { .sidebar { display: none !important; } }
+    @media (max-width: 768px)  {
+      .topbar-nav { display: none !important; }
+      .chart-area { min-height: 280px !important; }
+      .grid-main  { grid-template-columns: 1fr !important; }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+// ── Supabase config ────────────────────────────────────────────────────────────
+const SB_URL = 'https://nxiednydxyrtxpkmgtof.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
+const SB_HDR = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json' };
+
+// ── Color palette ──────────────────────────────────────────────────────────────
+const C = {
+  bg0:     '#060710',
+  bg1:     '#0C0F1E',
+  bg2:     '#111428',
+  card:    '#0F1220',
+  border:  'rgba(255,255,255,0.07)',
+  border2: 'rgba(255,255,255,0.12)',
+  amber:   '#F5A623',
+  amberD:  '#D4891E',
+  green:   '#22C55E',
+  red:     '#EF4444',
+  blue:    '#3B82F6',
+  purple:  '#8B5CF6',
+  teal:    '#14B8A6',
+  yellow:  '#EAB308',
+  muted:   '#64748B',
+  sub:     '#94A3B8',
+  text:    '#E2E8F0',
+};
+
+// ── Symbol manifest ─────────────────────────────────────────────────────────────
+const SYMBOLS = [
+  { sym: 'XAUUSD',  label: 'GOLD/USD',   pip: 0.01,    icon: '🥇', cat: 'forex'  },
+  { sym: 'EURUSD',  label: 'EUR/USD',    pip: 0.0001,  icon: '💶', cat: 'forex'  },
+  { sym: 'GBPUSD',  label: 'GBP/USD',    pip: 0.0001,  icon: '💷', cat: 'forex'  },
+  { sym: 'BTCUSDT', label: 'BTC/USDT',   pip: 1.0,     icon: '₿',  cat: 'crypto' },
+  { sym: 'ETHUSDT', label: 'ETH/USDT',   pip: 0.1,     icon: 'Ξ',  cat: 'crypto' },
+  { sym: 'NAS100',  label: 'NASDAQ 100', pip: 1.0,     icon: '📈', cat: 'index'  },
+];
+
+const TIMEFRAMES = ['m5','m15','h1','h4'];
+const TF_LABELS  = { m5:'M5', m15:'M15', h1:'H1', h4:'H4' };
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+const fmtPrice = (v, pip=0.01) => {
+  if (v == null) return '—';
+  const decimals = pip < 0.001 ? 5 : pip < 0.1 ? 2 : pip < 1 ? 2 : 1;
+  return Number(v).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
+const fmtPct  = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+const pctDiff = (a, b) => b ? ((a - b) / b) * 100 : 0;
+
+// ── Status badge ───────────────────────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const cfg = {
+    live:    { col: C.green,  dot: true,  label: '● LIVE'     },
+    delayed: { col: C.yellow, dot: false, label: '◑ DELAYED'  },
+    demo:    { col: C.muted,  dot: false, label: '○ DEMO'     },
+  }[status] || { col: C.muted, dot: false, label: '○ —' };
+
+  return (
+    <span style={{ fontFamily:'JetBrains Mono, monospace', fontSize:10, fontWeight:700, color:cfg.col,
+      background: cfg.col + '18', border:`1px solid ${cfg.col}40`, borderRadius:5, padding:'3px 8px',
+      letterSpacing:'0.08em' }}
+      className={cfg.dot ? 'pulse' : ''}>
+      {cfg.label}
+    </span>
+  );
+}
+
+// ── Verdict badge ──────────────────────────────────────────────────────────────
+function VerdictBadge({ verdict, confidence }) {
+  const cfg = {
+    LONG_NOW:   { bg:'#22C55E18', border:'#22C55E60', text: C.green,  icon:'↑', label:'LONG NOW'   },
+    SHORT_NOW:  { bg:'#EF444418', border:'#EF444460', text: C.red,    icon:'↓', label:'SHORT NOW'  },
+    WAIT_LONG:  { bg:'#3B82F618', border:'#3B82F660', text: C.blue,   icon:'⟳', label:'WAIT LONG'  },
+    WAIT_SHORT: { bg:'#8B5CF618', border:'#8B5CF660', text: C.purple, icon:'⟳', label:'WAIT SHORT' },
+    NO_TRADE:   { bg:'#64748B18', border:'#64748B40', text: C.muted,  icon:'✕', label:'NO TRADE'   },
+  }[verdict] || { bg:'#64748B18', border:'#64748B40', text: C.muted, icon:'?', label: verdict || '—' };
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:8 }}>
+      <div style={{
+        background: cfg.bg, border:`2px solid ${cfg.border}`,
+        borderRadius:16, padding:'20px 32px', textAlign:'center',
+        boxShadow: verdict === 'LONG_NOW' || verdict === 'SHORT_NOW' ? `0 0 40px ${cfg.border}` : 'none',
+      }}
+      className={verdict === 'LONG_NOW' || verdict === 'SHORT_NOW' ? 'glow' : ''}>
+        <div style={{ fontSize:36, marginBottom:4 }}>{cfg.icon}</div>
+        <div style={{ fontSize:22, fontWeight:900, color:cfg.text, letterSpacing:'0.05em' }}>{cfg.label}</div>
+        <div style={{ fontSize:12, color:C.muted, marginTop:4, fontFamily:'JetBrains Mono, monospace' }}>
+          {confidence}% confidence
+        </div>
+      </div>
+      {/* Confidence bar */}
+      <div style={{ width:'100%', height:6, background:'rgba(255,255,255,0.05)', borderRadius:3, overflow:'hidden' }}>
+        <div style={{ height:'100%', width:`${confidence}%`, borderRadius:3,
+          background: confidence >= 65 ? C.green : confidence >= 40 ? C.amber : C.muted,
+          transition:'width 0.6s ease' }}/>
+      </div>
+    </div>
+  );
+}
+
+// ── Confidence ring (SVG) ──────────────────────────────────────────────────────
+function ConfidenceRing({ value, color }) {
+  const r   = 36, cx = 44, cy = 44;
+  const circ = 2 * Math.PI * r;
+  const dash = circ * (value / 100);
+  return (
+    <svg width={88} height={88} viewBox="0 0 88 88">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={7}/>
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth={7}
+        strokeDasharray={`${dash} ${circ - dash}`}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${cx} ${cy})`}
+        style={{ transition:'stroke-dasharray 0.6s ease' }}/>
+      <text x={cx} y={cy + 1} textAnchor="middle" dominantBaseline="middle"
+        fill={color} fontFamily="JetBrains Mono, monospace" fontSize={14} fontWeight="700">{value}</text>
+      <text x={cx} y={cy + 15} textAnchor="middle" dominantBaseline="middle"
+        fill={C.muted} fontFamily="Inter, sans-serif" fontSize={9}>SCORE</text>
+    </svg>
+  );
+}
+
+// ── Reasoning code pill ────────────────────────────────────────────────────────
+function CodePill({ code }) {
+  const col = code.includes('BULLISH') || code.includes('LONG') || code.includes('LOW')
+    ? C.green : code.includes('BEARISH') || code.includes('SHORT') || code.includes('HIGH')
+    ? C.red : code.includes('SESSION') || code.includes('PREMIUM')
+    ? C.amber : code.includes('BLOCKED') || code.includes('NEWS')
+    ? C.red : C.blue;
+
+  return (
+    <span style={{
+      fontSize:10, fontWeight:700, color:col,
+      background: col + '18', border:`1px solid ${col}30`,
+      borderRadius:5, padding:'3px 7px', fontFamily:'JetBrains Mono, monospace',
+      letterSpacing:'0.05em', whiteSpace:'nowrap',
+    }}>{code}</span>
+  );
+}
+
+// ── Level row ──────────────────────────────────────────────────────────────────
+function LevelRow({ type, price, label, currentPrice, pip, isEntry, isSl, isTp }) {
+  const dist  = currentPrice ? pctDiff(price, currentPrice) : 0;
+  const above = price > currentPrice;
+  const col   = isEntry ? C.amber : isSl ? C.red : isTp ? C.green
+    : above ? C.sub : C.sub;
+  const typeCols = {
+    PDH:'#8B5CF6', PDL:'#8B5CF6', PWH:'#6366F1', PWL:'#6366F1',
+    EQH:'#EAB308', EQL:'#EAB308', ASIA_HIGH:'#14B8A6', ASIA_LOW:'#14B8A6',
+    CDH:'#64748B', CDL:'#64748B',
+  };
+
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:10, padding:'6px 0',
+      borderBottom:`1px solid ${C.border}` }}>
+      <div style={{ width:46, fontSize:9, fontWeight:700, color: typeCols[type] || C.muted,
+        fontFamily:'JetBrains Mono, monospace', letterSpacing:'0.06em', flexShrink:0 }}>{type}</div>
+      <div style={{ flex:1, fontSize:12, color:col, fontFamily:'JetBrains Mono, monospace',
+        fontWeight: isEntry||isSl||isTp ? 700 : 400 }}>{fmtPrice(price, pip)}</div>
+      <div style={{ fontSize:10, color: dist > 0 ? C.green : C.red, textAlign:'right', width:52,
+        fontFamily:'JetBrains Mono, monospace' }}>{fmtPct(dist)}</div>
+    </div>
+  );
+}
+
+// ── Compliance row ────────────────────────────────────────────────────────────
+function ComplianceRow({ id, status, label }) {
+  const icon  = status === 'ok' ? '✓' : status === 'warning' ? '⚠' : '✕';
+  const color = status === 'ok' ? C.green : status === 'warning' ? C.yellow : C.red;
+  return (
+    <div style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 0',
+      borderBottom:`1px solid ${C.border}` }}>
+      <span style={{ fontSize:13, color, width:20, textAlign:'center', fontWeight:700 }}>{icon}</span>
+      <span style={{ fontSize:12, color: status === 'ok' ? C.sub : color, flex:1 }}>{label}</span>
+    </div>
+  );
+}
+
+// ── Live Chart component ───────────────────────────────────────────────────────
+function LiveChart({ candles, signal, symbol, timeframe }) {
+  const containerRef = useRef(null);
+  const chartRef     = useRef(null);
+  const seriesRef    = useRef(null);
+  const zonesRef     = useRef([]);
+
+  // Create chart once
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const chart = LightweightCharts.createChart(containerRef.current, {
+      layout:     { background: { color: C.bg1 }, textColor: C.sub },
+      grid:       { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+      crosshair:  { mode: LightweightCharts.CrosshairMode.Normal,
+        vertLine: { color: C.amber + '60', labelBackgroundColor: C.amber },
+        horzLine: { color: C.amber + '40', labelBackgroundColor: '#1a1f3a' } },
+      timeScale:  { timeVisible: true, secondsVisible: false, borderColor: C.border },
+      rightPriceScale: { borderColor: C.border },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true },
+      handleScale:  { mouseWheel: true, pinch: true },
+    });
+
+    const series = chart.addCandlestickSeries({
+      upColor:          C.green,
+      downColor:        C.red,
+      borderUpColor:    C.green,
+      borderDownColor:  C.red,
+      wickUpColor:      C.green + 'AA',
+      wickDownColor:    C.red   + 'AA',
+    });
+
+    const ro = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      chart.applyOptions({ width, height });
+    });
+    ro.observe(containerRef.current);
+
+    chartRef.current  = chart;
+    seriesRef.current = series;
+
+    return () => {
+      ro.disconnect();
+      chart.remove();
+      chartRef.current  = null;
+      seriesRef.current = null;
+    };
+  }, []);
+
+  // Update candle data
+  useEffect(() => {
+    if (!seriesRef.current || !candles || candles.length === 0) return;
+    try {
+      const data = candles
+        .filter(c => c && c.time && c.open != null)
+        .sort((a, b) => a.time - b.time)
+        .map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close }));
+      seriesRef.current.setData(data);
+    } catch (e) {}
+  }, [candles]);
+
+  // Draw signal zones as price lines + shaded areas
+  useEffect(() => {
+    if (!chartRef.current || !seriesRef.current || !signal) return;
+
+    // Remove old zone primitives (lines)
+    zonesRef.current.forEach(line => { try { seriesRef.current.removePriceLine(line); } catch {} });
+    zonesRef.current = [];
+
+    const addLine = (price, color, title, style = 0, width = 1) => {
+      if (!price) return;
+      try {
+        const line = seriesRef.current.createPriceLine({
+          price, color, lineWidth: width,
+          lineStyle: style, // 0=solid 1=dotted 2=dashed 3=largedash
+          axisLabelVisible: true,
+          title,
+        });
+        zonesRef.current.push(line);
+      } catch {}
+    };
+
+    const lvl = signal.levels;
+    if (lvl) {
+      addLine(lvl.entry, C.amber,  ' Entry',  2, 2);
+      addLine(lvl.sl,    C.red,    ' SL',     2, 1);
+      addLine(lvl.tp1,   C.green,  ' TP1',    1, 1);
+      addLine(lvl.tp2,   C.green,  ' TP2',    1, 1);
+    }
+
+    // Asia range
+    const ar = signal.structure && signal.structure.asia_range;
+    if (ar) {
+      addLine(ar.high, '#14B8A680', ' Asia High', 3, 1);
+      addLine(ar.low,  '#14B8A680', ' Asia Low',  3, 1);
+    }
+
+    // Nearest liquidity zones (PDH / PDL)
+    const zones = (signal.structure && signal.structure.liquidity_zones) || [];
+    zones.slice(0, 4).forEach(z => {
+      const col = z.type === 'PDH' || z.type === 'EQH' ? '#EAB30860' : '#EAB30860';
+      addLine(z.price, col, ` ${z.type}`, 3, 1);
+    });
+
+    // Sweep level
+    if (signal.triggers && signal.triggers.sweep && signal.triggers.sweep.swept) {
+      addLine(signal.triggers.sweep.level, C.purple + '90', ' Sweep', 1, 1);
+    }
+
+    // MSS level
+    if (signal.triggers && signal.triggers.mss && signal.triggers.mss.mss) {
+      addLine(signal.triggers.mss.level, C.blue + '90', ' MSS', 2, 1);
+    }
+
+  }, [signal]);
+
+  return (
+    <div ref={containerRef} id="lwChart" style={{ width:'100%', height:'100%', borderRadius:12, overflow:'hidden' }}/>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────────────────────────────
+function App() {
+  const [activeSym,  setActiveSym]  = useState('XAUUSD');
+  const [activeTF,   setActiveTF]   = useState('m15');
+  const [dataStatus, setDataStatus] = useState('demo');
+  const [candles,    setCandles]    = useState({});
+  const [signal,     setSignal]     = useState(null);
+  const [compliance, setCompliance] = useState(null);
+  const [narrative,  setNarrative]  = useState('');
+  const [narLoading, setNarLoading] = useState(false);
+  const [lastPrice,  setLastPrice]  = useState(null);
+  const [prevPrice,  setPrevPrice]  = useState(null);
+  const [activeTab,  setActiveTab]  = useState('signal'); // 'signal'|'levels'|'compliance'
+  const [analysisTs, setAnalysisTs] = useState(null);
+
+  const dpRef   = useRef(null);
+  const unsubRef = useRef(null);
+  const reanalysisTimer = useRef(null);
+
+  const symInfo = SYMBOLS.find(s => s.sym === activeSym) || SYMBOLS[0];
+
+  // ── Connect DataProvider ───────────────────────────────────────────────────
+  useEffect(() => {
+    const PP = window.PropPilot;
+    if (!PP) return;
+
+    if (!dpRef.current) {
+      dpRef.current = new PP.DataProvider({
+        // Keys are optional — app falls back to demo mode if absent
+        twelveDataKey: '',  // Add your Twelve Data API key here
+        alpacaKey:     '',  // Add your Alpaca API key here
+        alpacaSecret:  '',
+        maxCandlesPerTF: 800,
+      });
+    }
+
+    const dp = dpRef.current;
+
+    // Status listener
+    const offStatus = dp.onStatusChange(({ symbol, status }) => {
+      if (symbol === activeSym) setDataStatus(status);
+    });
+
+    // Subscribe to all timeframes
+    const tfs = ['m1','m5','m15','h1','h4','d1'];
+    if (unsubRef.current) unsubRef.current();
+    unsubRef.current = dp.subscribe(activeSym, tfs, (evt) => {
+      if (evt.symbol !== activeSym) return;
+
+      // Update candle store
+      setCandles(prev => ({ ...prev, [evt.timeframe]: evt.history }));
+      setDataStatus(evt.status);
+
+      // Track price changes
+      if (evt.timeframe === 'm1' || evt.timeframe === 'm5') {
+        setLastPrice(p => { setPrevPrice(p); return evt.candle.close; });
+      }
+    });
+
+    setDataStatus(dp.getStatus(activeSym));
+
+    return () => {
+      offStatus();
+      if (unsubRef.current) { unsubRef.current(); unsubRef.current = null; }
+    };
+  }, [activeSym]);
+
+  // ── Run SMC analysis on candle updates ────────────────────────────────────
+  useEffect(() => {
+    const PP = window.PropPilot;
+    if (!PP || !PP.analyzeMarketStructure) return;
+
+    clearTimeout(reanalysisTimer.current);
+    reanalysisTimer.current = setTimeout(() => {
+      const m5  = candles.m5  || [];
+      const m15 = candles.m15 || [];
+      if (m5.length < 10 && m15.length < 10) return;
+
+      const sig = PP.analyzeMarketStructure(
+        { m5, m15, h1: candles.h1 || [], h4: candles.h4 || [], d1: candles.d1 || [] },
+        activeSym,
+        new Date(),
+        { newsRisk: false }
+      );
+
+      setSignal(sig);
+      setAnalysisTs(new Date());
+
+      // Prop compliance check (dummy account)
+      const comp = PP.checkPropCompliance(sig, {
+        balance:    100000,
+        dailyLoss:  0,
+        dailyDDPct: 0.05,
+        maxDDPct:   0.10,
+        riskPct:    0.01,
+      });
+      setCompliance(comp);
+
+      // Save to Supabase (non-blocking)
+      if (sig.verdict !== 'NO_TRADE') saveSignalToDB(sig, activeSym, activeTF);
+    }, 1500); // debounce — re-analyse 1.5s after last candle update
+
+    return () => clearTimeout(reanalysisTimer.current);
+  }, [candles, activeSym, activeTF]);
+
+  // ── Save signal to Supabase ────────────────────────────────────────────────
+  async function saveSignalToDB(sig, sym, tf) {
+    try {
+      await fetch(`${SB_URL}/rest/v1/smc_signals`, {
+        method: 'POST',
+        headers: { ...SB_HDR, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({
+          symbol:          sym,
+          timeframe:       tf,
+          verdict:         sig.verdict,
+          confidence:      sig.confidence,
+          reasoning_codes: sig.reasoning_codes,
+          entry_price:     sig.levels?.entry,
+          sl_price:        sig.levels?.sl,
+          tp1_price:       sig.levels?.tp1,
+          tp2_price:       sig.levels?.tp2,
+          invalidation:    sig.invalidation,
+          session_ctx:     sig.session_context,
+          htf_trend:       sig.structure?.trend_htf,
+          ltf_trend:       sig.structure?.trend_ltf,
+          sweep_occurred:  sig.triggers?.sweep?.swept || false,
+          sweep_level:     sig.triggers?.sweep?.level,
+          mss_occurred:    sig.triggers?.mss?.mss     || false,
+          mss_level:       sig.triggers?.mss?.level,
+          displacement:    sig.triggers?.displacement?.displacement || false,
+          atr:             sig.structure?.atr,
+          data_status:     dataStatus,
+          signal_json:     sig,
+        }),
+      });
+    } catch (e) { console.warn('Signal save failed:', e.message); }
+  }
+
+  // ── Generate AI narrative ─────────────────────────────────────────────────
+  async function generateNarrative() {
+    if (!signal || !window.PropPilot) return;
+    setNarLoading(true);
+    setNarrative('');
+    try {
+      const prompt = window.PropPilot.buildAINarrativePrompt(signal, []);
+      // Send to Supabase Edge Function (which wraps Claude API)
+      const res = await fetch(`${SB_URL}/functions/v1/auto-analyze`, {
+        method: 'POST',
+        headers: { ...SB_HDR },
+        body: JSON.stringify({ type: 'narrative', prompt, symbol: activeSym }),
+      });
+      const data = await res.json();
+      setNarrative(data.narrative || data.content || data.text || 'Narrative unavailable — configure API key in Edge Function.');
+    } catch (e) {
+      setNarrative('Could not reach AI endpoint. Ensure auto-analyze Edge Function is deployed with a valid LLM API key.');
+    } finally {
+      setNarLoading(false);
+    }
+  }
+
+  // ── UI helpers ────────────────────────────────────────────────────────────
+  const card = {
+    background: C.card,
+    border:     `1px solid ${C.border}`,
+    borderRadius: 14,
+    padding:    '18px 20px',
+  };
+
+  const priceColor = lastPrice != null && prevPrice != null
+    ? lastPrice >= prevPrice ? C.green : C.red
+    : C.text;
+
+  const verdictColor = signal ? {
+    LONG_NOW: C.green, SHORT_NOW: C.red,
+    WAIT_LONG: C.blue, WAIT_SHORT: C.purple, NO_TRADE: C.muted,
+  }[signal.verdict] || C.muted : C.muted;
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh', background:C.bg0 }}>
+
+      {/* ── Top Bar ── */}
+      <div style={{ borderBottom:`1px solid ${C.border}`, background:C.bg1, flexShrink:0, zIndex:10 }}>
+        <div style={{ maxWidth:1600, margin:'0 auto', padding:'0 20px', height:56,
+          display:'flex', alignItems:'center', justifyContent:'space-between', gap:16 }}>
+
+          {/* Logo */}
+          <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
+            <div style={{ width:32, height:32, borderRadius:8,
+              background:`linear-gradient(135deg, ${C.amber}, ${C.amberD})`,
+              display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>⚡</div>
+            <div>
+              <div style={{ fontWeight:800, fontSize:15, color:C.text }}>PropPilot AI</div>
+              <div style={{ fontSize:9, color:C.muted, letterSpacing:'0.1em', textTransform:'uppercase' }}>SMC Engine v2</div>
+            </div>
+          </div>
+
+          {/* Symbol pills */}
+          <div className="topbar-nav" style={{ display:'flex', gap:4, overflowX:'auto' }}>
+            {SYMBOLS.map(s => (
+              <button key={s.sym} onClick={() => setActiveSym(s.sym)}
+                style={{
+                  padding:'6px 12px', borderRadius:8, border:'none', cursor:'pointer',
+                  fontWeight:600, fontSize:12, transition:'all 0.2s',
+                  background: activeSym === s.sym ? `${C.amber}25` : 'transparent',
+                  color: activeSym === s.sym ? C.amber : C.sub,
+                  outline: activeSym === s.sym ? `1px solid ${C.amber}50` : 'none',
+                }}>
+                <span style={{ marginRight:4 }}>{s.icon}</span>{s.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Right cluster */}
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
+            <StatusBadge status={dataStatus}/>
+            {lastPrice && (
+              <div style={{ fontFamily:'JetBrains Mono, monospace', fontWeight:700, fontSize:16, color:priceColor,
+                transition:'color 0.3s' }}>
+                {fmtPrice(lastPrice, symInfo.pip)}
+              </div>
+            )}
+            <a href="index.html" style={{ fontSize:12, color:C.muted, textDecoration:'none',
+              padding:'5px 10px', border:`1px solid ${C.border}`, borderRadius:8 }}>OS →</a>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Main layout ── */}
+      <div style={{ flex:1, display:'flex', overflow:'hidden', maxWidth:1600, margin:'0 auto', width:'100%', padding:'0 4px' }}>
+
+        {/* ── Left sidebar: signal panel ── */}
+        <div className="sidebar" style={{ width:310, flexShrink:0, overflowY:'auto', padding:'16px 12px 16px 16px', display:'flex', flexDirection:'column', gap:12 }}>
+
+          {/* TF selector */}
+          <div style={{ display:'flex', gap:4, background:C.bg1, padding:4, borderRadius:10, border:`1px solid ${C.border}` }}>
+            {TIMEFRAMES.map(tf => (
+              <button key={tf} onClick={() => setActiveTF(tf)}
+                style={{
+                  flex:1, padding:'5px 0', borderRadius:7, border:'none', cursor:'pointer',
+                  fontWeight:700, fontSize:11, letterSpacing:'0.05em',
+                  background: activeTF === tf ? C.amber : 'transparent',
+                  color: activeTF === tf ? C.bg0 : C.muted,
+                  transition:'all 0.15s',
+                }}>
+                {TF_LABELS[tf]}
+              </button>
+            ))}
+          </div>
+
+          {/* Verdict */}
+          {signal ? (
+            <div style={card}>
+              <VerdictBadge verdict={signal.verdict} confidence={signal.confidence}/>
+              <div style={{ marginTop:14, fontSize:12, color:C.sub, lineHeight:1.7,
+                background:'rgba(255,255,255,0.02)', borderRadius:8, padding:'10px 12px' }}>
+                {signal.session_context}
+              </div>
+            </div>
+          ) : (
+            <div style={{ ...card, textAlign:'center', color:C.muted, padding:32 }}>
+              <div className="spin" style={{ fontSize:24, marginBottom:12 }}>⟳</div>
+              <div style={{ fontSize:13 }}>Connecting data feed…</div>
+            </div>
+          )}
+
+          {/* Reasoning codes */}
+          {signal && signal.reasoning_codes && signal.reasoning_codes.length > 0 && (
+            <div style={card}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700, textTransform:'uppercase',
+                letterSpacing:'0.08em', marginBottom:10 }}>Confluence</div>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:5 }}>
+                {signal.reasoning_codes.map(c => <CodePill key={c} code={c}/>)}
+              </div>
+            </div>
+          )}
+
+          {/* Structure mini-panel */}
+          {signal && signal.structure && (
+            <div style={card}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10 }}>Structure</div>
+              {[
+                ['HTF Trend', signal.structure.trend_htf, signal.structure.trend_htf === 'bullish' ? C.green : signal.structure.trend_htf === 'bearish' ? C.red : C.muted],
+                ['LTF Trend', signal.structure.trend_ltf, signal.structure.trend_ltf === 'bullish' ? C.green : signal.structure.trend_ltf === 'bearish' ? C.red : C.muted],
+                ['ATR (H1)',  fmtPrice(signal.structure.atr, symInfo.pip), C.sub],
+                ['Session',  signal.structure.session, C.amber],
+              ].map(([k, v, col]) => (
+                <div key={k} style={{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                  padding:'6px 0', borderBottom:`1px solid ${C.border}` }}>
+                  <span style={{ fontSize:11, color:C.muted }}>{k}</span>
+                  <span style={{ fontSize:12, fontWeight:700, color:col, fontFamily:'JetBrains Mono, monospace' }}>{v || '—'}</span>
+                </div>
+              ))}
+              {/* Trigger indicators */}
+              <div style={{ display:'flex', gap:6, marginTop:10, flexWrap:'wrap' }}>
+                {[
+                  ['SWEEP', signal.triggers?.sweep?.swept,       C.purple],
+                  ['MSS',   signal.triggers?.mss?.mss,           C.blue],
+                  ['DISP',  signal.triggers?.displacement?.displacement, C.teal],
+                  ['FVG',   (signal.structure.fvg_zones||[]).length > 0, C.yellow],
+                ].map(([label, active, col]) => (
+                  <div key={label} style={{
+                    fontSize:9, fontWeight:700, padding:'3px 7px', borderRadius:5, letterSpacing:'0.07em',
+                    fontFamily:'JetBrains Mono, monospace',
+                    background: active ? col + '20' : 'rgba(255,255,255,0.03)',
+                    color: active ? col : C.muted,
+                    border: `1px solid ${active ? col + '50' : C.border}`,
+                  }}>{label}</div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Invalidation */}
+          {signal && signal.invalidation && (
+            <div style={{ ...card, borderColor: C.red + '30', background:'rgba(239,68,68,0.04)' }}>
+              <div style={{ fontSize:10, color:C.red, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6 }}>Invalidation</div>
+              <div style={{ fontSize:11, color:C.sub, lineHeight:1.7 }}>{signal.invalidation}</div>
+            </div>
+          )}
+
+          {/* Last analysis time */}
+          {analysisTs && (
+            <div style={{ fontSize:10, color:C.muted, textAlign:'center', fontFamily:'JetBrains Mono, monospace' }}>
+              Last analysis: {analysisTs.toLocaleTimeString()}
+            </div>
+          )}
+        </div>
+
+        {/* ── Chart area ── */}
+        <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', padding:'16px 8px' }}>
+          <div className="chart-area" style={{ flex:1, minHeight:400, position:'relative' }}>
+            <LiveChart
+              candles={candles[activeTF] || candles.m15 || candles.m5 || []}
+              signal={signal}
+              symbol={activeSym}
+              timeframe={activeTF}
+            />
+            {/* Chart overlay: symbol + TF label */}
+            <div style={{ position:'absolute', top:12, left:14, display:'flex', alignItems:'center', gap:8, pointerEvents:'none' }}>
+              <span style={{ fontSize:13, fontWeight:800, color:C.text }}>{symInfo.icon} {symInfo.label}</span>
+              <span style={{ fontSize:10, color:C.amber, fontWeight:700, fontFamily:'JetBrains Mono, monospace',
+                background:C.amber + '18', border:`1px solid ${C.amber}30`, borderRadius:5, padding:'2px 7px' }}>{TF_LABELS[activeTF]}</span>
+            </div>
+            {/* Demo mode banner */}
+            {dataStatus === 'demo' && (
+              <div style={{ position:'absolute', top:12, right:14, pointerEvents:'none' }}>
+                <div style={{ fontSize:10, color:C.yellow, background:'rgba(234,179,8,0.12)',
+                  border:'1px solid rgba(234,179,8,0.3)', borderRadius:6, padding:'3px 10px', fontWeight:700 }}>
+                  ⚠ DEMO MODE — Add API keys for live data
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Bottom: AI narrative + tabs ── */}
+          <div style={{ height:200, marginTop:8, display:'flex', gap:8, flexShrink:0 }}>
+
+            {/* AI Narrative */}
+            <div style={{ ...card, flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:C.amber, textTransform:'uppercase', letterSpacing:'0.08em' }}>
+                  🤖 Coach Narrative
+                </div>
+                <button onClick={generateNarrative} disabled={narLoading || !signal}
+                  style={{
+                    fontSize:11, fontWeight:700, color: narLoading ? C.muted : C.bg0,
+                    background: narLoading ? C.muted : C.amber,
+                    border:'none', borderRadius:7, padding:'5px 12px', cursor:'pointer', transition:'all 0.2s',
+                  }}>
+                  {narLoading ? '⟳ Thinking…' : 'Generate ✦'}
+                </button>
+              </div>
+              <div style={{ flex:1, overflowY:'auto', fontSize:13, color:C.sub, lineHeight:1.8 }}>
+                {narLoading ? (
+                  <div style={{ display:'flex', alignItems:'center', gap:10, color:C.muted }}>
+                    <div className="spin">⟳</div> Consulting coach AI…
+                  </div>
+                ) : narrative ? (
+                  <p>{narrative}</p>
+                ) : (
+                  <p style={{ color:C.muted, fontStyle:'italic', fontSize:12 }}>
+                    Click "Generate" to get a plain-English coaching brief for the current setup.
+                    The AI explains the trade rationale — it does not generate the signal.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Mobile-visible compliance snapshot */}
+            {compliance && (
+              <div style={{ ...card, width:220, flexShrink:0, overflowY:'auto' }}>
+                <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10,
+                  color: compliance.compliant ? C.green : C.red }}>
+                  {compliance.compliant ? '✓ Prop OK' : '✕ Blocked'}
+                </div>
+                {compliance.checks.slice(0, 5).map(c => (
+                  <ComplianceRow key={c.id} {...c}/>
+                ))}
+                {compliance.blockedReason && (
+                  <div style={{ fontSize:11, color:C.red, marginTop:8, lineHeight:1.5 }}>
+                    {compliance.blockedReason}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Right sidebar: levels ── */}
+        <div className="sidebar" style={{ width:270, flexShrink:0, overflowY:'auto', padding:'16px 16px 16px 8px', display:'flex', flexDirection:'column', gap:12 }}>
+
+          {/* Entry / SL / TP levels */}
+          {signal && signal.levels && (
+            <div style={card}>
+              <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10 }}>
+                Trade Levels
+              </div>
+              <div style={{ display:'flex', flexDirection:'column' }}>
+                <LevelRow type="ENTRY" price={signal.levels.entry} pip={symInfo.pip}
+                  currentPrice={lastPrice} isEntry/>
+                <LevelRow type="SL" price={signal.levels.sl} pip={symInfo.pip}
+                  currentPrice={lastPrice} isSl/>
+                <LevelRow type="TP1" price={signal.levels.tp1} pip={symInfo.pip}
+                  currentPrice={lastPrice} isTp/>
+                <LevelRow type="TP2" price={signal.levels.tp2} pip={symInfo.pip}
+                  currentPrice={lastPrice} isTp/>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, marginTop:12 }}>
+                {[
+                  ['R:R', `1:${signal.levels.risk_reward?.toFixed(1) || '—'}`],
+                  ['Dir', signal.levels.direction?.toUpperCase() || '—'],
+                ].map(([l, v]) => (
+                  <div key={l} style={{ background:'rgba(255,255,255,0.03)', borderRadius:8, padding:'8px 10px' }}>
+                    <div style={{ fontSize:9, color:C.muted, marginBottom:3 }}>{l}</div>
+                    <div style={{ fontSize:13, fontWeight:700, color:C.amber, fontFamily:'JetBrains Mono, monospace' }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {signal.levels.ote_zone && (
+                <div style={{ marginTop:10, background:'rgba(245,166,35,0.06)', borderRadius:8,
+                  padding:'8px 10px', border:`1px solid ${C.amber}25` }}>
+                  <div style={{ fontSize:9, color:C.amber, fontWeight:700, marginBottom:3 }}>OTE ZONE (61.8–79%)</div>
+                  <div style={{ fontSize:11, color:C.sub, fontFamily:'JetBrains Mono, monospace' }}>
+                    {fmtPrice(signal.levels.ote_zone[0], symInfo.pip)} – {fmtPrice(signal.levels.ote_zone[1], symInfo.pip)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Key liquidity zones */}
+          {signal && signal.structure && signal.structure.liquidity_zones && signal.structure.liquidity_zones.length > 0 && (
+            <div style={card}>
+              <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10 }}>
+                Liquidity Zones
+              </div>
+              {signal.structure.liquidity_zones.slice(0, 6).map((z, i) => (
+                <LevelRow key={i} type={z.type} price={z.price} label={z.label}
+                  currentPrice={lastPrice || signal.structure.current_price} pip={symInfo.pip}/>
+              ))}
+            </div>
+          )}
+
+          {/* FVG zones */}
+          {signal && signal.structure && signal.structure.fvg_zones && signal.structure.fvg_zones.length > 0 && (
+            <div style={card}>
+              <div style={{ fontSize:11, fontWeight:700, color:C.muted, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10 }}>
+                Unfilled FVGs
+              </div>
+              {signal.structure.fvg_zones.slice(0, 4).map((f, i) => (
+                <div key={i} style={{ padding:'7px 0', borderBottom:`1px solid ${C.border}`, display:'flex', gap:8, alignItems:'center' }}>
+                  <div style={{ fontSize:9, fontWeight:700, color: f.type === 'bullish' ? C.green : C.red,
+                    fontFamily:'JetBrains Mono, monospace', letterSpacing:'0.06em', width:48 }}>
+                    {f.type === 'bullish' ? '▲ BULL' : '▼ BEAR'}
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:11, color:C.sub, fontFamily:'JetBrains Mono, monospace' }}>
+                      {fmtPrice(f.bottom, symInfo.pip)} – {fmtPrice(f.top, symInfo.pip)}
+                    </div>
+                    <div style={{ fontSize:9, color:C.muted, marginTop:1 }}>
+                      mid {fmtPrice(f.midpoint, symInfo.pip)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Asia range */}
+          {signal && signal.structure && signal.structure.asia_range && (
+            <div style={card}>
+              <div style={{ fontSize:11, fontWeight:700, color:C.teal, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10 }}>
+                🌏 Asia Range
+              </div>
+              {[
+                ['High',  signal.structure.asia_range.high],
+                ['Low',   signal.structure.asia_range.low],
+                ['Range', fmtPrice(signal.structure.asia_range.high - signal.structure.asia_range.low, symInfo.pip) + ' pts'],
+              ].map(([l, v]) => (
+                <div key={l} style={{ display:'flex', justifyContent:'space-between', padding:'5px 0',
+                  borderBottom:`1px solid ${C.border}` }}>
+                  <span style={{ fontSize:11, color:C.muted }}>{l}</span>
+                  <span style={{ fontSize:11, color:C.sub, fontFamily:'JetBrains Mono, monospace' }}>
+                    {typeof v === 'number' ? fmtPrice(v, symInfo.pip) : v}
+                  </span>
+                </div>
+              ))}
+              {signal.structure.london_break && (
+                <div style={{ marginTop:8, fontSize:11, fontWeight:700,
+                  color: signal.structure.london_break === 'bullish' ? C.green : C.red }}>
+                  {signal.structure.london_break === 'bullish' ? '↑ London broke Asia High' : '↓ London broke Asia Low'}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Prop compliance (sidebar) */}
+          {compliance && (
+            <div style={{ ...card, borderColor: compliance.compliant ? C.green + '30' : C.red + '30' }}>
+              <div style={{ fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:10,
+                color: compliance.compliant ? C.green : C.red }}>
+                {compliance.compliant ? '✓ Prop Compliant' : '✕ Trade Blocked'}
+              </div>
+              {compliance.checks.map(c => <ComplianceRow key={c.id} {...c}/>)}
+              {compliance.blockedReason && (
+                <div style={{ fontSize:11, color:C.red, marginTop:10, padding:'8px 10px',
+                  background:'rgba(239,68,68,0.07)', borderRadius:7 }}>
+                  {compliance.blockedReason}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PropPilot — Analytics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { min-height: 100%; }
+    body { background: #060710; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    @keyframes spin   { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.5s ease forwards; }
+    @media (max-width: 860px) {
+      .grid-4 { grid-template-columns: 1fr 1fr !important; }
+      .grid-3 { grid-template-columns: 1fr !important; }
+      .s-pad  { padding: 0 16px !important; }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const SB_URL = 'https://nxiednydxyrtxpkmgtof.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
+const HDR = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` };
+
+const C = {
+  amber:'#F5A623', green:'#34D399', red:'#F87171', yellow:'#FBBF24',
+  indigo:'#818CF8', teal:'#2DD4BF', purple:'#A78BFA',
+  bg:'#060710', text:'#F1F5F9', sub:'#94A3B8', muted:'#475569',
+  border:'rgba(255,255,255,0.07)', surf:'rgba(255,255,255,0.04)',
+};
+
+const card  = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 };
+const cardS = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 };
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const pct  = (v) => `${(v * 100).toFixed(1)}%`;
+const r2   = (v) => v == null ? '—' : v.toFixed(2);
+const rint = (v) => v == null ? '—' : Math.round(v);
+
+const STATE_COL = {
+  LONG_NOW: '#34D399', SHORT_NOW: '#F87171',
+  WAIT_LONG: '#F5A623', WAIT_SHORT: '#FBBF24',
+  WAIT_BREAK: '#818CF8', AVOID_NEWS: '#F97316', AVOID_CHOP: '#475569',
+};
+const OUTCOME_COL = { TP2_HIT:'#10B981', TP1_HIT:'#34D399', SL_HIT:'#F87171', EXPIRED:'#475569', OPEN:'#818CF8' };
+const INST_EMOJI  = { 'XAU/USD':'🥇','NAS100':'📈','EUR/USD':'€','GBP/USD':'£','BTC/USD':'₿','ETH/USD':'⟠','SPY':'🏦','AAPL':'🍎','NVDA':'🤖','USD/JPY':'¥' };
+
+// ── Small SVG bar chart ────────────────────────────────────────────────────
+function BarChart({ data, height = 140 }) {
+  // data: [{ label, value (0-1), count, color }]
+  if (!data?.length) return null;
+  const max = Math.max(...data.map(d => d.value), 0.01);
+  const barW = Math.min(52, Math.floor(520 / data.length) - 8);
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <svg viewBox={`0 0 ${Math.max(data.length * (barW + 10) + 20, 300)} ${height + 40}`}
+           style={{ width: '100%', height: height + 40, minWidth: 260 }}>
+        {data.map((d, i) => {
+          const bh  = Math.max(4, (d.value / max) * height);
+          const x   = 10 + i * (barW + 10);
+          const y   = height - bh + 5;
+          const col = d.color || C.amber;
+          return (
+            <g key={d.label}>
+              {/* bar */}
+              <rect x={x} y={y} width={barW} height={bh} rx={4} fill={col} opacity={0.85}/>
+              {/* value label */}
+              <text x={x + barW / 2} y={y - 5} textAnchor="middle" fill={col} fontSize={10} fontWeight="700">
+                {d.value > 0 ? pct(d.value) : '—'}
+              </text>
+              {/* count */}
+              {d.count != null && (
+                <text x={x + barW / 2} y={height + 18} textAnchor="middle" fill={C.muted} fontSize={9}>
+                  n={d.count}
+                </text>
+              )}
+              {/* label */}
+              <text x={x + barW / 2} y={height + 30} textAnchor="middle" fill={C.sub} fontSize={9} fontWeight="600">
+                {d.label.length > 8 ? d.label.slice(0, 8) : d.label}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
+// ── Equity Curve (Lightweight Charts) ─────────────────────────────────────
+function EquityCurve({ signals }) {
+  const containerRef = useRef(null);
+  const chartRef     = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current || !signals?.length) return;
+    if (!window.LightweightCharts) return;
+    if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
+
+    // Build cumulative R curve from resolved signals sorted by outcome_at or created_at
+    const resolved = signals
+      .filter(s => s.outcome !== 'OPEN' && s.pnl_r != null)
+      .sort((a, b) => new Date(a.outcome_at || a.created_at) - new Date(b.outcome_at || b.created_at));
+
+    if (!resolved.length) return;
+
+    let cumR = 0;
+    const seen = new Set();
+    const curveData = resolved.map(s => {
+      cumR += (s.pnl_r || 0);
+      let t = Math.floor(new Date(s.outcome_at || s.created_at).getTime() / 1000);
+      while (seen.has(t)) t++;
+      seen.add(t);
+      return { time: t, value: parseFloat(cumR.toFixed(3)) };
+    });
+
+    const chart = window.LightweightCharts.createChart(containerRef.current, {
+      width:  containerRef.current.offsetWidth,
+      height: 220,
+      layout:  { background: { color: 'transparent' }, textColor: '#64748B', fontSize: 11 },
+      grid:    { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
+      crosshair: { mode: 1 },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+      timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true },
+    });
+    chartRef.current = chart;
+
+    const finalR  = curveData[curveData.length - 1]?.value ?? 0;
+    const lineCol = finalR >= 0 ? C.green : C.red;
+
+    const area = chart.addAreaSeries({
+      lineColor: lineCol, topColor: `${lineCol}30`, bottomColor: `${lineCol}05`,
+      lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+    });
+    area.setData(curveData);
+
+    // Zero line
+    area.createPriceLine({ price: 0, color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: 'BE' });
+
+    chart.timeScale().fitContent();
+    const ro = new ResizeObserver(() => {
+      if (containerRef.current) chart.applyOptions({ width: containerRef.current.offsetWidth });
+    });
+    ro.observe(containerRef.current);
+
+    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
+  }, [signals]);
+
+  const resolved = signals?.filter(s => s.outcome !== 'OPEN' && s.pnl_r != null) ?? [];
+  if (!resolved.length) return (
+    <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted, fontSize: 13 }}>
+      Equity curve appears after first resolved signals
+    </div>
+  );
+
+  return <div ref={containerRef} style={{ width: '100%' }}/>;
+}
+
+// ── Hourly Heatmap ─────────────────────────────────────────────────────────
+function HourlyHeatmap({ signals }) {
+  if (!signals?.length) return (
+    <div style={{ color: C.muted, fontSize: 12, textAlign: 'center', padding: 20 }}>No data yet</div>
+  );
+
+  const resolved = signals.filter(s => s.outcome !== 'OPEN');
+  if (!resolved.length) return (
+    <div style={{ color: C.muted, fontSize: 12, textAlign: 'center', padding: 20 }}>No resolved signals yet</div>
+  );
+
+  // Build 24-hour win rate map
+  const hourData = Array.from({ length: 24 }, (_, h) => {
+    const inHour = resolved.filter(s => new Date(s.created_at).getUTCHours() === h);
+    const wins   = inHour.filter(s => s.outcome === 'TP1_HIT' || s.outcome === 'TP2_HIT');
+    const losses = inHour.filter(s => s.outcome === 'SL_HIT');
+    const decided = wins.length + losses.length;
+    return { h, total: inHour.length, decided, wr: decided > 0 ? wins.length / decided : null };
+  });
+
+  const maxTotal = Math.max(...hourData.map(d => d.total), 1);
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', minWidth: 500, padding: '8px 0' }}>
+        {hourData.map(({ h, total, wr }) => {
+          const hasData = total > 0;
+          const col = !hasData ? C.border
+            : wr == null ? '#475569'
+            : wr >= 0.6  ? '#10B981'
+            : wr >= 0.45 ? '#F5A623'
+            : '#F87171';
+          const barH = hasData ? Math.max(8, (total / maxTotal) * 60) : 4;
+
+          return (
+            <div key={h} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+              {hasData && wr != null && (
+                <span style={{ fontSize: 8, color: col, fontWeight: 700 }}>{pct(wr)}</span>
+              )}
+              <div style={{ width: '100%', height: barH, background: col, borderRadius: 2, opacity: hasData ? 0.85 : 0.3, minHeight: 4 }}/>
+              <span style={{ fontSize: 9, color: C.muted }}>{h}h</span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 10, color: C.muted }}>
+        <span style={{ color: '#10B981' }}>■ WR ≥60%</span>
+        <span style={{ color: '#F5A623' }}>■ 45–60%</span>
+        <span style={{ color: '#F87171' }}>■ &lt;45%</span>
+        <span style={{ color: C.muted }}>■ No data</span>
+        <span style={{ marginLeft: 'auto' }}>Bar height = signal count. UTC hours.</span>
+      </div>
+    </div>
+  );
+}
+
+// ── KPI Card ───────────────────────────────────────────────────────────────
+function KPI({ icon, label, value, sub, color = C.amber }) {
+  return (
+    <div style={{ ...cardS, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ fontSize: 22 }}>{icon}</div>
+      <div style={{ fontSize: 26, fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: C.sub }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: C.muted }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── Empty State ────────────────────────────────────────────────────────────
+function EmptyState() {
+  return (
+    <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+      <div style={{ fontSize: 56, marginBottom: 16 }}>📊</div>
+      <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>Building your performance history</div>
+      <div style={{ color: C.sub, fontSize: 15, lineHeight: 1.7, maxWidth: 480, margin: '0 auto 28px' }}>
+        The outcome tracker runs every hour. After your first signals are analyzed and resolved
+        (SL hit, TP1/TP2 hit, or expired after 24–120h), this dashboard fills with real data.
+      </div>
+      <div style={{ display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
+        {[
+          ['⚡', 'Analyze instruments', 'signal.html'],
+          ['🏠', 'PropPilot OS', 'index.html'],
+        ].map(([icon, label, href]) => (
+          <a key={href} href={href} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: C.surf, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, textDecoration: 'none', fontWeight: 700, fontSize: 14 }}>
+            <span>{icon}</span>{label}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────────────────────────
+function Analytics() {
+  const [signals,    setSignals]    = useState([]);
+  const [stats,      setStats]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [activeTab,  setActiveTab]  = useState('overview'); // overview | setups | heatmap | pillars
+
+  const load = useCallback(async () => {
+    try {
+      const [sigRes, statRes] = await Promise.all([
+        fetch(`${SB_URL}/rest/v1/smc_signals?select=*&order=created_at.desc&limit=500`, { headers: HDR }),
+        fetch(`${SB_URL}/rest/v1/strategy_stats?select=*&order=expectancy.desc`, { headers: HDR }),
+      ]);
+      const [sigRaw, statData] = await Promise.all([sigRes.json(), statRes.json()]);
+      // Normalize smc_signals → analytics format
+      const sigData = Array.isArray(sigRaw) ? sigRaw.map(s => ({
+        ...s,
+        signal_state: s.verdict,
+        outcome:      s.outcome == null ? 'OPEN' : s.outcome.toUpperCase().replace('_HIT', '_HIT'),
+        pnl_r:        s.outcome_pnl_r,
+        session_name: s.session_name || s.session_ctx || '—',
+      })) : [];
+      if (sigData.length)          setSignals(sigData);
+      if (Array.isArray(statData)) setStats(statData);
+      setLastUpdate(new Date());
+    } catch (e) {
+      console.warn('Analytics load error:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+  // Auto-refresh every 5 minutes
+  useEffect(() => { const t = setInterval(load, 300_000); return () => clearInterval(t); }, [load]);
+
+  // ── Derived metrics ────────────────────────────────────────────────────
+  const resolved  = signals.filter(s => s.outcome !== 'OPEN');
+  const wins      = resolved.filter(s => s.outcome === 'TP1_HIT' || s.outcome === 'TP2_HIT');
+  const losses    = resolved.filter(s => s.outcome === 'SL_HIT');
+  const decided   = wins.length + losses.length;
+  const overallWR = decided > 0 ? wins.length / decided : null;
+  const totalR    = resolved.reduce((s, x) => s + (x.pnl_r || 0), 0);
+  const openCount = signals.filter(s => s.outcome === 'OPEN').length;
+
+  // Best setup by expectancy (min 3 signals)
+  const bestSetup = stats.filter(s => s.total_signals >= 3).sort((a, b) => b.expectancy - a.expectancy)[0];
+
+  // ── Blueprint analytical pillars ──────────────────────────────────────────
+  // Expectancy
+  const grossProfit  = wins.reduce((s, x)   => s + Math.abs(x.pnl_r || 1), 0);
+  const grossLoss    = losses.reduce((s, x) => s + Math.abs(x.pnl_r || 1), 0);
+  const avgWin       = wins.length   > 0 ? grossProfit / wins.length   : 0;
+  const avgLoss      = losses.length > 0 ? grossLoss   / losses.length : 0;
+  const expectancy   = overallWR != null
+    ? (overallWR * avgWin) - ((1 - overallWR) * avgLoss)
+    : null;
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 99 : 0;
+
+  // Contextual win rate by session
+  const sessGroups2 = {};
+  for (const s of resolved) {
+    const k = s.session_name || 'Unknown';
+    if (!sessGroups2[k]) sessGroups2[k] = { w: 0, l: 0, rs: [] };
+    if (s.outcome === 'TP1_HIT' || s.outcome === 'TP2_HIT') { sessGroups2[k].w++; sessGroups2[k].rs.push(s.pnl_r || 0); }
+    if (s.outcome === 'SL_HIT')                              { sessGroups2[k].l++; sessGroups2[k].rs.push(s.pnl_r || -1); }
+  }
+  const sessStats = Object.entries(sessGroups2).map(([name, v]) => {
+    const d   = v.w + v.l;
+    const wr  = d > 0 ? v.w / d : null;
+    const exp = wr != null ? (wr * avgWin) - ((1-wr) * avgLoss) : null;
+    return { name, w: v.w, l: v.l, d, wr, exp };
+  }).sort((a, b) => (b.exp ?? -999) - (a.exp ?? -999));
+
+  // Drawdown pattern analysis
+  const resolvedChron = [...resolved].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  let curStreak = 0, maxLoseStreak = 0, curWinStreak = 0, maxWinStreak = 0;
+  let streakType = null;
+  const streakHistory = [];
+  for (const s of resolvedChron) {
+    const isWin = s.outcome === 'TP1_HIT' || s.outcome === 'TP2_HIT';
+    if (streakType === null) { streakType = isWin ? 'W' : 'L'; curStreak = 1; }
+    else if ((isWin && streakType === 'W') || (!isWin && streakType === 'L')) { curStreak++; }
+    else { streakHistory.push({ type: streakType, len: curStreak }); streakType = isWin ? 'W' : 'L'; curStreak = 1; }
+    if (isWin)  maxWinStreak  = Math.max(maxWinStreak,  curStreak);
+    if (!isWin) maxLoseStreak = Math.max(maxLoseStreak, curStreak);
+  }
+  if (curStreak > 0 && streakType) streakHistory.push({ type: streakType, len: curStreak });
+
+  // Consecutive loss clusters
+  const lossClusters = streakHistory.filter(s => s.type === 'L' && s.len >= 2);
+
+  // R-multiple adherence (actual pnl_r vs expected: TP1=~0.8, TP2=~2.0, SL=-1.0)
+  const expected = { TP1_HIT: 0.8, TP2_HIT: 2.0, SL_HIT: -1.0 };
+  const rAdh = resolved.filter(s => s.pnl_r != null && expected[s.outcome] != null).map(s => ({
+    outcome: s.outcome,
+    actual:  s.pnl_r,
+    exp:     expected[s.outcome],
+    ratio:   s.pnl_r / expected[s.outcome],
+  }));
+  const avgRAdh = rAdh.length > 0 ? rAdh.reduce((s, x) => s + x.ratio, 0) / rAdh.length : null;
+
+  // ── Chart data ────────────────────────────────────────────────────────
+  // Win rate by signal state
+  const stateGroups = {};
+  for (const s of resolved) {
+    const k = s.signal_state || 'Unknown';
+    if (!stateGroups[k]) stateGroups[k] = { w: 0, l: 0 };
+    if (s.outcome === 'TP1_HIT' || s.outcome === 'TP2_HIT') stateGroups[k].w++;
+    if (s.outcome === 'SL_HIT') stateGroups[k].l++;
+  }
+  const stateData = Object.entries(stateGroups)
+    .map(([k, v]) => {
+      const d = v.w + v.l;
+      return { label: k.replace('_NOW','').replace('_',' '), value: d > 0 ? v.w / d : 0, count: d, color: STATE_COL[k] || C.amber };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  // Win rate by instrument
+  const instGroups = {};
+  for (const s of resolved) {
+    const k = s.symbol || 'Unknown';
+    if (!instGroups[k]) instGroups[k] = { w: 0, l: 0 };
+    if (s.outcome === 'TP1_HIT' || s.outcome === 'TP2_HIT') instGroups[k].w++;
+    if (s.outcome === 'SL_HIT') instGroups[k].l++;
+  }
+  const instData = Object.entries(instGroups)
+    .map(([k, v]) => {
+      const d = v.w + v.l;
+      const emoji = INST_EMOJI[k] || '';
+      return { label: `${emoji} ${k}`, value: d > 0 ? v.w / d : 0, count: d, color: C.teal };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  // Win rate by session
+  const sessGroups = {};
+  for (const s of resolved) {
+    const k = s.session_name || 'Unknown';
+    if (!sessGroups[k]) sessGroups[k] = { w: 0, l: 0 };
+    if (s.outcome === 'TP1_HIT' || s.outcome === 'TP2_HIT') sessGroups[k].w++;
+    if (s.outcome === 'SL_HIT') sessGroups[k].l++;
+  }
+  const sessData = Object.entries(sessGroups)
+    .map(([k, v]) => {
+      const d = v.w + v.l;
+      return { label: k, value: d > 0 ? v.w / d : 0, count: d, color: C.indigo };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  // Outcome distribution
+  const outcomeCounts = { TP2_HIT: 0, TP1_HIT: 0, SL_HIT: 0, EXPIRED: 0, OPEN: 0 };
+  for (const s of signals) { if (s.outcome in outcomeCounts) outcomeCounts[s.outcome]++; }
+
+  const hasData = resolved.length > 0;
+
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text }}>
+
+      {/* ── NAV ── */}
+      <div style={{ borderBottom: `1px solid ${C.border}`, background: 'rgba(6,7,16,0.96)', padding: '0 32px', position: 'sticky', top: 0, zIndex: 100 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 58 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg,${C.amber},#B85500)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 900 }}>✈</div>
+            <span style={{ fontWeight: 900, fontSize: 16, letterSpacing: '-0.03em' }}>PropPilot <span style={{ color: C.amber }}>AI</span></span>
+            <span style={{ color: C.muted, fontSize: 12, marginLeft: 4 }}>/ Analytics</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {lastUpdate && (
+              <span style={{ fontSize: 11, color: C.muted }}>
+                Updated {Math.round((Date.now() - lastUpdate) / 60000)}m ago
+              </span>
+            )}
+            <button onClick={load} style={{ padding: '5px 12px', border: `1px solid ${C.border}`, borderRadius: 7, background: 'transparent', color: C.sub, fontSize: 12, cursor: 'pointer' }}>
+              ↻ Refresh
+            </button>
+            <a href="roadmap.html" style={{ color: C.teal, fontSize: 13, fontWeight: 700, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.teal}30`, borderRadius: 7 }}>🗺 Roadmap</a>
+            <a href="signal.html" style={{ color: C.amber, fontSize: 13, fontWeight: 700, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.amber}30`, borderRadius: 7 }}>⚡ Signal Engine</a>
+            <a href="index.html"  style={{ color: C.muted, fontSize: 13, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.border}`, borderRadius: 7 }}>← PropPilot OS</a>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 28px' }} className="s-pad">
+
+        {/* ── HEADER ── */}
+        <div style={{ padding: '36px 0 28px' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '5px 14px', background: 'rgba(245,166,35,0.09)', border: '1px solid rgba(245,166,35,0.22)', borderRadius: 20, marginBottom: 14 }}>
+            <span style={{ color: C.amber, fontSize: 12, fontWeight: 700 }}>📊 PHASE 1 — OUTCOME LOOP · LEARNING FROM DATA</span>
+          </div>
+          <div style={{ fontSize: 34, fontWeight: 900, letterSpacing: '-0.03em', marginBottom: 8 }}>
+            Strategy Performance <span style={{ color: C.amber }}>Analytics</span>
+          </div>
+          <div style={{ color: C.sub, fontSize: 15, lineHeight: 1.6 }}>
+            Every signal analyzed → outcome tracked → win rates computed. The AI learns what actually works.
+          </div>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <div style={{ width: 32, height: 32, border: `3px solid ${C.border}`, borderTopColor: C.amber, borderRadius: '50%', animation: 'spin 0.9s linear infinite', margin: '0 auto 16px' }}/>
+            <div style={{ color: C.sub }}>Loading analytics…</div>
+          </div>
+        ) : !hasData ? (
+          <EmptyState/>
+        ) : (
+          <div className="fade-in">
+
+            {/* ── KPI CARDS ── */}
+            <div className="grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 24 }}>
+              <KPI icon="📐" label="Expectancy" color={expectancy != null ? (expectancy > 0 ? C.green : C.red) : C.muted}
+                value={expectancy != null ? `${expectancy > 0 ? '+' : ''}${expectancy.toFixed(3)}R` : '—'}
+                sub={`Primary edge KPI · PF: ${profitFactor.toFixed(2)}x`}/>
+              <KPI icon="🎯" label="Overall Win Rate" color={overallWR != null ? (overallWR >= 0.5 ? C.green : C.red) : C.muted}
+                value={overallWR != null ? pct(overallWR) : '—'}
+                sub={`${decided} decided · Avg win ${avgWin.toFixed(2)}R`}/>
+              <KPI icon="💎" label="Total R Earned" color={totalR >= 0 ? C.green : C.red}
+                value={`${totalR >= 0 ? '+' : ''}${totalR.toFixed(2)}R`}
+                sub={`${resolved.length} resolved · ${openCount} open`}/>
+              <KPI icon="📊" label="R Adherence" color={avgRAdh != null ? (avgRAdh >= 0.85 ? C.green : C.yellow) : C.muted}
+                value={avgRAdh != null ? `${(avgRAdh*100).toFixed(0)}%` : '—'}
+                sub={`Actual vs planned R · ${rAdh.length} samples`}/>
+            </div>
+
+            {/* ── OUTCOME BREAKDOWN ── */}
+            <div style={{ ...cardS, marginBottom: 20, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: C.muted, fontWeight: 700, marginRight: 8 }}>OUTCOMES</span>
+              {Object.entries(outcomeCounts).filter(([, v]) => v > 0).map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', background: `${OUTCOME_COL[k]}10`, border: `1px solid ${OUTCOME_COL[k]}30`, borderRadius: 20 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: 3, background: OUTCOME_COL[k] }}/>
+                  <span style={{ fontSize: 12, color: OUTCOME_COL[k], fontWeight: 700 }}>{k}</span>
+                  <span style={{ fontSize: 12, color: C.sub }}>{v}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* ── TABS ── */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
+              {[['overview','📊 Overview'],['pillars','📐 Analytical Pillars'],['setups','🔬 Setups Table'],['heatmap','🕐 Hourly Heatmap']].map(([id, label]) => (
+                <button key={id} onClick={() => setActiveTab(id)}
+                  style={{ padding: '8px 18px', borderRadius: 9, border: `1px solid ${activeTab===id?C.amber:C.border}`, background: activeTab===id?`${C.amber}12`:'transparent', color: activeTab===id?C.amber:C.sub, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── OVERVIEW TAB ── */}
+            {activeTab === 'overview' && (
+              <div>
+                {/* Equity Curve */}
+                <div style={{ ...card, marginBottom: 20 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>📈 R Equity Curve</div>
+                  <div style={{ color: C.muted, fontSize: 12, marginBottom: 16 }}>
+                    Cumulative R profit over time. Each resolved signal adds/subtracts R. SL = −1R, TP1 ≈ +0.8R, TP2 ≈ +2R
+                  </div>
+                  <EquityCurve signals={signals}/>
+                </div>
+
+                {/* Bar charts row */}
+                <div className="grid-3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 20 }}>
+                  <div style={{ ...card }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: C.sub, marginBottom: 14 }}>Win Rate by Signal State</div>
+                    {stateData.length ? <BarChart data={stateData}/> : <div style={{ color: C.muted, fontSize: 12 }}>No data</div>}
+                  </div>
+                  <div style={{ ...card }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: C.sub, marginBottom: 14 }}>Win Rate by Instrument</div>
+                    {instData.length ? <BarChart data={instData}/> : <div style={{ color: C.muted, fontSize: 12 }}>No data</div>}
+                  </div>
+                  <div style={{ ...card }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: C.sub, marginBottom: 14 }}>Win Rate by Session</div>
+                    {sessData.length ? <BarChart data={sessData}/> : <div style={{ color: C.muted, fontSize: 12 }}>No data</div>}
+                  </div>
+                </div>
+
+                {/* Recent signals */}
+                <div style={{ ...card }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 16 }}>🕓 Recent Signals</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                          {['Symbol','TF','State','Dir','Conf','Price','TP1','TP2','SL','Outcome','P&L R','When'].map(h => (
+                            <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: C.muted, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {signals.slice(0, 20).map(s => {
+                          const col = OUTCOME_COL[s.outcome] || C.muted;
+                          const ago = Math.round((Date.now() - new Date(s.created_at)) / 3600000);
+                          return (
+                            <tr key={s.id} style={{ borderBottom: `1px solid ${C.border}`, opacity: s.outcome === 'OPEN' ? 1 : 0.85 }}>
+                              <td style={{ padding: '7px 10px', color: C.amber, fontWeight: 700 }}>{s.symbol}</td>
+                              <td style={{ padding: '7px 10px', color: C.muted }}>{s.timeframe}</td>
+                              <td style={{ padding: '7px 10px' }}>
+                                <span style={{ background: `${STATE_COL[s.signal_state]||C.muted}18`, color: STATE_COL[s.signal_state]||C.muted, borderRadius: 5, padding: '2px 7px', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                  {s.signal_state}
+                                </span>
+                              </td>
+                              <td style={{ padding: '7px 10px', color: s.direction === 'LONG' ? C.green : s.direction === 'SHORT' ? C.red : C.muted, fontWeight: 700 }}>
+                                {s.direction || '—'}
+                              </td>
+                              <td style={{ padding: '7px 10px', color: C.sub }}>{s.confidence ?? '—'}%</td>
+                              <td style={{ padding: '7px 10px', color: C.text, fontWeight: 600 }}>{s.price?.toFixed(4) ?? '—'}</td>
+                              <td style={{ padding: '7px 10px', color: C.green }}>{s.tp1?.toFixed(4) ?? '—'}</td>
+                              <td style={{ padding: '7px 10px', color: '#10B981' }}>{s.tp2?.toFixed(4) ?? '—'}</td>
+                              <td style={{ padding: '7px 10px', color: C.red }}>{s.sl?.toFixed(4) ?? '—'}</td>
+                              <td style={{ padding: '7px 10px' }}>
+                                <span style={{ background: `${col}15`, color: col, borderRadius: 5, padding: '2px 8px', fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                  {s.outcome}
+                                </span>
+                              </td>
+                              <td style={{ padding: '7px 10px', color: s.pnl_r > 0 ? C.green : s.pnl_r < 0 ? C.red : C.muted, fontWeight: 700 }}>
+                                {s.pnl_r != null ? `${s.pnl_r > 0 ? '+' : ''}${s.pnl_r.toFixed(2)}R` : '—'}
+                              </td>
+                              <td style={{ padding: '7px 10px', color: C.muted, whiteSpace: 'nowrap' }}>{ago}h ago</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── ANALYTICAL PILLARS TAB ── */}
+            {activeTab === 'pillars' && (
+              <div>
+                {/* ── Pillar 1: Expectancy ── */}
+                <div style={{ ...card, marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+                    <span style={{ fontSize: 22 }}>📐</span>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 16 }}>Expectancy — Primary Edge KPI</div>
+                      <div style={{ color: C.muted, fontSize: 12 }}>E = (WinRate × AvgWin) − (LossRate × AvgLoss). Positive E = provable edge. Target: E &gt; 0.10R</div>
+                    </div>
+                    <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                      <div style={{ fontSize: 32, fontWeight: 900, color: expectancy != null ? (expectancy > 0 ? C.green : C.red) : C.muted }}>
+                        {expectancy != null ? `${expectancy > 0 ? '+' : ''}${expectancy.toFixed(3)}R` : '—'}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted }}>per trade, expected</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginTop: 20 }}>
+                    {[
+                      { label: 'Win Rate',     value: overallWR != null ? pct(overallWR) : '—', color: overallWR >= 0.5 ? C.green : C.red },
+                      { label: 'Avg Win (R)',  value: avgWin  > 0 ? `+${avgWin.toFixed(2)}R`  : '—', color: C.green  },
+                      { label: 'Avg Loss (R)', value: avgLoss > 0 ? `-${avgLoss.toFixed(2)}R` : '—', color: C.red    },
+                      { label: 'Profit Factor',value: profitFactor > 0 ? `${profitFactor.toFixed(2)}x` : '—', color: profitFactor >= 1.2 ? C.green : C.red },
+                    ].map(m => (
+                      <div key={m.label} style={{ ...cardS, textAlign: 'center' }}>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: m.color, lineHeight: 1 }}>{m.value}</div>
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>{m.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: 16, padding: '10px 14px', background: 'rgba(0,0,0,0.25)', borderRadius: 8, fontSize: 11, color: C.sub, lineHeight: 1.7 }}>
+                    <strong style={{ color: C.text }}>Formula breakdown:</strong>&nbsp;
+                    E = ({overallWR != null ? pct(overallWR) : '?'} × {avgWin.toFixed(3)}R) − ({overallWR != null ? pct(1-overallWR) : '?'} × {avgLoss.toFixed(3)}R)
+                    = {expectancy != null ? `${expectancy > 0 ? '+' : ''}${expectancy.toFixed(4)}R` : 'need data'}
+                    &nbsp;·&nbsp;Phase 1 gate requires Profit Factor ≥ 1.2 (currently {profitFactor.toFixed(2)}x)
+                  </div>
+                </div>
+
+                {/* ── Pillar 2: R-Multiple Adherence ── */}
+                <div style={{ ...card, marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                    <span style={{ fontSize: 22 }}>📊</span>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 16 }}>R-Multiple Adherence</div>
+                      <div style={{ color: C.muted, fontSize: 12 }}>Actual outcome R vs planned R. Tracks execution quality — are TPs being hit at the expected level?</div>
+                    </div>
+                    <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                      <div style={{ fontSize: 28, fontWeight: 900, color: avgRAdh != null ? (avgRAdh >= 0.85 ? C.green : C.yellow) : C.muted }}>
+                        {avgRAdh != null ? `${(avgRAdh*100).toFixed(0)}%` : '—'}
+                      </div>
+                      <div style={{ fontSize: 11, color: C.muted }}>avg adherence · {rAdh.length} samples</div>
+                    </div>
+                  </div>
+                  {rAdh.length === 0 ? (
+                    <div style={{ color: C.muted, fontSize: 13, textAlign: 'center', padding: 20 }}>R-multiple data appears after first resolved signals with pnl_r values</div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+                      {Object.entries(expected).map(([outcome, expR]) => {
+                        const group = rAdh.filter(r => r.outcome === outcome);
+                        const avgActual = group.length > 0 ? group.reduce((s, x) => s + x.actual, 0) / group.length : null;
+                        const adh = avgActual != null ? avgActual / expR : null;
+                        const col = adh != null ? (adh >= 0.85 ? C.green : adh >= 0.6 ? C.yellow : C.red) : C.muted;
+                        return (
+                          <div key={outcome} style={{ ...cardS, textAlign: 'center' }}>
+                            <div style={{ fontSize: 11, fontWeight: 800, color: C.muted, marginBottom: 8 }}>{outcome.replace('_HIT','')}</div>
+                            <div style={{ fontSize: 22, fontWeight: 900, color: col }}>
+                              {avgActual != null ? `${avgActual > 0 ? '+' : ''}${avgActual.toFixed(2)}R` : '—'}
+                            </div>
+                            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>vs planned {expR > 0 ? '+' : ''}{expR}R</div>
+                            {adh != null && (
+                              <div style={{ marginTop: 6 }}>
+                                <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                                  <div style={{ height: '100%', width: `${Math.min(100, adh*100)}%`, background: col, borderRadius: 2 }}/>
+                                </div>
+                                <div style={{ fontSize: 10, color: col, marginTop: 3 }}>{(adh*100).toFixed(0)}% adherence · n={group.length}</div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Pillar 3: Contextual Win Rate ── */}
+                <div style={{ ...card, marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                    <span style={{ fontSize: 22 }}>🗺</span>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 16 }}>Contextual Win Rate by Session</div>
+                      <div style={{ color: C.muted, fontSize: 12 }}>Win rate and Expectancy sliced by trading session. Tells you WHERE and WHEN the edge is sharpest.</div>
+                    </div>
+                  </div>
+                  {sessStats.length === 0 ? (
+                    <div style={{ color: C.muted, fontSize: 13, textAlign: 'center', padding: 20 }}>Session data appears after resolved signals accumulate</div>
+                  ) : (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                            {['Session','Wins','Losses','Decided','Win Rate','Expectancy','Edge?'].map(h => (
+                              <th key={h} style={{ padding: '7px 12px', textAlign: 'left', color: C.muted, fontWeight: 700 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessStats.map(s => {
+                            const wrCol = s.wr != null ? (s.wr >= 0.6 ? C.green : s.wr >= 0.45 ? C.yellow : C.red) : C.muted;
+                            const expCol = s.exp != null ? (s.exp > 0 ? C.green : C.red) : C.muted;
+                            return (
+                              <tr key={s.name} style={{ borderBottom: `1px solid ${C.border}` }}>
+                                <td style={{ padding: '9px 12px', fontWeight: 800, color: C.indigo }}>{s.name}</td>
+                                <td style={{ padding: '9px 12px', color: C.green }}>{s.w}</td>
+                                <td style={{ padding: '9px 12px', color: C.red   }}>{s.l}</td>
+                                <td style={{ padding: '9px 12px', color: C.sub  }}>{s.d}</td>
+                                <td style={{ padding: '9px 12px', fontWeight: 800, color: wrCol }}>
+                                  {s.wr != null ? pct(s.wr) : '—'}
+                                </td>
+                                <td style={{ padding: '9px 12px', fontWeight: 900, color: expCol }}>
+                                  {s.exp != null ? `${s.exp > 0 ? '+' : ''}${s.exp.toFixed(3)}R` : '—'}
+                                </td>
+                                <td style={{ padding: '9px 12px' }}>
+                                  {s.exp != null && s.d >= 5 ? (
+                                    <span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 800,
+                                      background: s.exp > 0.05 ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.12)',
+                                      color: s.exp > 0.05 ? C.green : C.red }}>
+                                      {s.exp > 0.05 ? '✅ Edge' : '❌ No Edge'}
+                                    </span>
+                                  ) : <span style={{ color: C.muted, fontSize: 11 }}>need ≥5</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Pillar 4: Drawdown Pattern Analysis ── */}
+                <div style={{ ...card, marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                    <span style={{ fontSize: 22 }}>📉</span>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 16 }}>Drawdown Pattern & Behaviour</div>
+                      <div style={{ color: C.muted, fontSize: 12 }}>Losing streak length, clustering, recovery. Detects tilt and revenge-trading patterns before they compound.</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 20 }}>
+                    {[
+                      { label: 'Max Losing Streak', value: maxLoseStreak || '—', color: maxLoseStreak >= 5 ? C.red : maxLoseStreak >= 3 ? C.yellow : C.green },
+                      { label: 'Max Winning Streak', value: maxWinStreak || '—', color: C.green },
+                      { label: 'Loss Clusters (≥2)', value: lossClusters.length || '—', color: lossClusters.length >= 3 ? C.red : C.sub },
+                      { label: 'Resolved Trades', value: resolved.length || '—', color: C.amber },
+                    ].map(m => (
+                      <div key={m.label} style={{ ...cardS, textAlign: 'center' }}>
+                        <div style={{ fontSize: 28, fontWeight: 900, color: m.color, lineHeight: 1 }}>{m.value}</div>
+                        <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>{m.label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Streak visualizer */}
+                  {streakHistory.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: C.muted, letterSpacing: '0.07em', marginBottom: 10 }}>STREAK HISTORY (chronological)</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {streakHistory.map((s, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px',
+                            background: s.type === 'W' ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)',
+                            border: `1px solid ${s.type === 'W' ? 'rgba(52,211,153,0.25)' : 'rgba(248,113,113,0.25)'}`,
+                            borderRadius: 6, fontSize: 11 }}>
+                            <span style={{ color: s.type === 'W' ? C.green : C.red, fontWeight: 800 }}>{s.type === 'W' ? '▲' : '▼'}</span>
+                            <span style={{ color: s.type === 'W' ? C.green : C.red, fontWeight: 700 }}>{s.len}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {lossClusters.length >= 3 && (
+                        <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, fontSize: 12, color: C.red }}>
+                          ⚠️ <strong>Loss clustering detected</strong> — {lossClusters.length} losing streaks of 2+ in a row. Review whether losses cluster by session or market conditions. This pattern may indicate regime exposure rather than random variance.
+                        </div>
+                      )}
+                      {maxLoseStreak >= 5 && (
+                        <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(248,113,113,0.08)', border: '1px solid rgba(248,113,113,0.25)', borderRadius: 8, fontSize: 12, color: C.red }}>
+                          ⚠️ <strong>Max losing streak of {maxLoseStreak}</strong> — Watch for revenge-trading patterns after extended drawdown periods. Kill-switch triggers at 5% daily loss.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {streakHistory.length === 0 && (
+                    <div style={{ color: C.muted, fontSize: 13, textAlign: 'center', padding: 20 }}>Streak data appears after resolved signals accumulate</div>
+                  )}
+                </div>
+
+                {/* Phase 1 Gate Progress */}
+                <div style={{ ...card, marginBottom: 20 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>🚪 Phase 1 → Phase 2 Gate Progress</div>
+                  <div style={{ color: C.muted, fontSize: 12, marginBottom: 18 }}>All three criteria must pass before enabling live execution. <a href="roadmap.html" style={{ color: C.amber, textDecoration: 'none' }}>View full roadmap →</a></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
+                    {[
+                      { label: 'Trades', current: decided, target: 100, unit: '', pass: decided >= 100, color: C.teal },
+                      { label: 'Profit Factor', current: profitFactor, target: 1.2, unit: 'x', pass: profitFactor >= 1.2, color: C.amber },
+                      { label: 'Max Drawdown', current: 100, target: 100, unit: '', pass: true, color: C.indigo, note: 'Track via paper_account' },
+                    ].map(m => (
+                      <div key={m.label} style={{ ...cardS }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: C.sub }}>{m.label}</div>
+                          <div style={{ fontSize: 16, }}>{m.pass ? '✅' : '🔴'}</div>
+                        </div>
+                        <div style={{ fontSize: 24, fontWeight: 900, color: m.pass ? C.green : C.red }}>
+                          {m.note ? <span style={{ fontSize: 13, color: C.muted }}>{m.note}</span>
+                            : `${typeof m.current === 'number' ? m.current.toFixed(m.current > 10 ? 0 : 2) : '—'}${m.unit}`}
+                        </div>
+                        {!m.note && (
+                          <div>
+                            <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden', marginTop: 8 }}>
+                              <div style={{ height: '100%', width: `${Math.min(100, (m.current/m.target)*100)}%`, background: m.pass ? C.green : m.color, borderRadius: 2, transition: 'width 0.8s' }}/>
+                            </div>
+                            <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Target: {m.target}{m.unit}</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── SETUPS TABLE TAB ── */}
+            {activeTab === 'setups' && (
+              <div style={{ ...card }}>
+                <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>🔬 All Setups — Sorted by Expectancy</div>
+                <div style={{ color: C.muted, fontSize: 12, marginBottom: 18 }}>
+                  Expectancy = (WR × avg win R) − (LR × avg loss R). Positive = edge. Minimum 3 signals shown.
+                </div>
+                {stats.length === 0 ? (
+                  <div style={{ color: C.muted, fontSize: 13, textAlign: 'center', padding: 24 }}>
+                    Stats update daily at midnight UTC. Trigger manually:<br/>
+                    <code style={{ color: C.amber, fontSize: 11 }}>
+                      GET https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-strategy-stats
+                    </code>
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                          {['Symbol','State','Session','TF','Signals','WR','Avg R','Expectancy','Avg MFE','Avg MAE','Conf','Best Hr'].map(h => (
+                            <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: C.muted, fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stats.map((s, i) => {
+                          const good = s.expectancy > 0;
+                          const wrCol = s.win_rate >= 0.6 ? C.green : s.win_rate >= 0.45 ? C.yellow : C.red;
+                          return (
+                            <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                              <td style={{ padding: '7px 10px', color: C.amber, fontWeight: 700 }}>
+                                {INST_EMOJI[s.symbol] || ''} {s.symbol}
+                              </td>
+                              <td style={{ padding: '7px 10px' }}>
+                                <span style={{ background: `${STATE_COL[s.signal_state]||C.muted}18`, color: STATE_COL[s.signal_state]||C.muted, borderRadius: 5, padding: '2px 6px', fontSize: 10, fontWeight: 700 }}>
+                                  {s.signal_state}
+                                </span>
+                              </td>
+                              <td style={{ padding: '7px 10px', color: C.sub }}>{s.session_name}</td>
+                              <td style={{ padding: '7px 10px', color: C.muted }}>{s.timeframe}</td>
+                              <td style={{ padding: '7px 10px', color: C.sub }}>{s.total_signals}</td>
+                              <td style={{ padding: '7px 10px', color: wrCol, fontWeight: 700 }}>{pct(s.win_rate)}</td>
+                              <td style={{ padding: '7px 10px', color: s.avg_pnl_r >= 0 ? C.green : C.red, fontWeight: 700 }}>
+                                {s.avg_pnl_r >= 0 ? '+' : ''}{r2(s.avg_pnl_r)}R
+                              </td>
+                              <td style={{ padding: '7px 10px', color: good ? C.green : C.red, fontWeight: 900 }}>
+                                {good ? '+' : ''}{r2(s.expectancy)}
+                              </td>
+                              <td style={{ padding: '7px 10px', color: C.green }}>{r2(s.avg_mfe)}R</td>
+                              <td style={{ padding: '7px 10px', color: C.red }}>{r2(s.avg_mae)}R</td>
+                              <td style={{ padding: '7px 10px', color: C.sub }}>{rint(s.avg_confidence)}%</td>
+                              <td style={{ padding: '7px 10px', color: C.teal }}>
+                                {s.best_hour != null ? `${s.best_hour}:00 UTC` : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── HEATMAP TAB ── */}
+            {activeTab === 'heatmap' && (
+              <div style={{ ...card }}>
+                <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>🕐 Hourly Performance Heatmap</div>
+                <div style={{ color: C.muted, fontSize: 12, marginBottom: 20 }}>
+                  Win rate and signal volume by UTC hour. Tells you WHEN this strategy performs best.
+                </div>
+                <HourlyHeatmap signals={signals}/>
+              </div>
+            )}
+
+            {/* ── Footer ── */}
+            <div style={{ padding: '20px 0 40px', color: C.muted, fontSize: 11, textAlign: 'center' }}>
+              Outcome tracker runs hourly · Stats update daily 00:05 UTC · Data from {signals.length} total signals
+              <br/>
+              <span style={{ marginTop: 4, display: 'block' }}>
+                Manual trigger: <code style={{ color: C.amber }}>GET .../functions/v1/update-outcomes</code>
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Analytics/>);
+</script>
+</body>
+</html>

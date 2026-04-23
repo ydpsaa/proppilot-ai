@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PropPilot — Roadmap</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { min-height: 100%; }
+    body { background: #060710; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    @keyframes spin   { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse  { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+    .fade-in { animation: fadeIn 0.5s ease forwards; }
+    .pulse   { animation: pulse 2s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback } = React;
+
+const SB_URL = 'https://nxiednydxyrtxpkmgtof.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
+const HDR = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` };
+
+const C = {
+  amber:'#F5A623', green:'#34D399', red:'#F87171', yellow:'#FBBF24',
+  indigo:'#818CF8', teal:'#2DD4BF', purple:'#A78BFA', blue:'#60A5FA',
+  bg:'#060710', text:'#F1F5F9', sub:'#94A3B8', muted:'#475569',
+  border:'rgba(255,255,255,0.07)', surf:'rgba(255,255,255,0.04)',
+};
+
+const card  = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 };
+const cardS = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 };
+
+// ── Progress Ring ─────────────────────────────────────────────────────────────
+function Ring({ pct: p = 0, size = 72, stroke = 6, color = C.amber, label, sub }) {
+  const r   = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const dash  = Math.max(0, Math.min(1, p)) * circ;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke}/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" style={{ transition: 'stroke-dasharray 0.7s ease' }}/>
+      </svg>
+      {label && <div style={{ fontSize: 11, fontWeight: 800, color, marginTop: -2 }}>{label}</div>}
+      {sub   && <div style={{ fontSize: 10, color: C.muted, textAlign: 'center', maxWidth: 70 }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── Gate Criterion Row ────────────────────────────────────────────────────────
+function GateCriterion({ icon, label, current, target, unit = '', pass, warn }) {
+  const col  = pass ? C.green : warn ? C.yellow : C.red;
+  const icon2 = pass ? '✅' : warn ? '⚠️' : '🔴';
+  const progress = Math.min(1, current / target);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 0', borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ fontSize: 18, flexShrink: 0 }}>{icon}</div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{label}</div>
+        <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${progress * 100}%`, background: col, borderRadius: 2, transition: 'width 0.8s ease' }}/>
+        </div>
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 900, color: col }}>
+          {typeof current === 'number' ? current.toFixed(current < 10 ? 2 : 0) : current}{unit}
+        </div>
+        <div style={{ fontSize: 10, color: C.muted }}>/ {target}{unit}</div>
+      </div>
+      <div style={{ fontSize: 18, flexShrink: 0 }}>{icon2}</div>
+    </div>
+  );
+}
+
+// ── Feature Chip ──────────────────────────────────────────────────────────────
+function Chip({ done, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px',
+      background: done ? 'rgba(52,211,153,0.08)' : C.surf,
+      border: `1px solid ${done ? 'rgba(52,211,153,0.25)' : C.border}`,
+      borderRadius: 8, fontSize: 12, color: done ? C.green : C.sub }}>
+      <span>{done ? '✓' : '○'}</span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+// ── Phase Card ────────────────────────────────────────────────────────────────
+function PhaseCard({ phase, title, subtitle, status, color, icon, children, gate }) {
+  const statusConfig = {
+    active:    { label: 'ACTIVE NOW',   bg: 'rgba(245,166,35,0.12)',  border: 'rgba(245,166,35,0.4)',  col: '#F5A623', pulse: true  },
+    pending:   { label: 'LOCKED',       bg: 'rgba(71,85,105,0.1)',    border: 'rgba(71,85,105,0.3)',   col: '#475569', pulse: false },
+    completed: { label: 'COMPLETED',    bg: 'rgba(52,211,153,0.1)',   border: 'rgba(52,211,153,0.35)', col: '#34D399', pulse: false },
+  };
+  const s = statusConfig[status] || statusConfig.pending;
+
+  return (
+    <div style={{ ...card, border: `1px solid ${s.border}`, background: s.bg, marginBottom: 20, position: 'relative', overflow: 'hidden' }}>
+      {/* Glow strip */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${color}00, ${color}, ${color}00)` }}/>
+
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 14, background: `${color}18`, border: `2px solid ${color}35`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>{icon}</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: C.muted, letterSpacing: '0.08em', marginBottom: 2 }}>PHASE {phase}</div>
+            <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: '-0.02em', color: C.text }}>{title}</div>
+            <div style={{ fontSize: 13, color: C.sub, marginTop: 2 }}>{subtitle}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {s.pulse && <div className="pulse" style={{ width: 8, height: 8, borderRadius: 4, background: s.col }}/>}
+          <div style={{ padding: '5px 14px', borderRadius: 20, background: `${s.col}15`, border: `1px solid ${s.col}40`,
+            fontSize: 11, fontWeight: 800, color: s.col, letterSpacing: '0.06em' }}>{s.label}</div>
+        </div>
+      </div>
+
+      {children}
+
+      {gate && (
+        <div style={{ marginTop: 20, padding: '14px 16px', background: 'rgba(0,0,0,0.25)', borderRadius: 10, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 11, fontWeight: 800, color: C.muted, letterSpacing: '0.07em', marginBottom: 10 }}>🚪 GATE CRITERIA TO UNLOCK NEXT PHASE</div>
+          {gate}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function Roadmap() {
+  const [loading, setLoading] = useState(true);
+  const [signals, setSignals] = useState([]);
+  const [account, setAccount] = useState({});
+
+  const load = useCallback(async () => {
+    try {
+      const [sigRes, accRes] = await Promise.all([
+        fetch(`${SB_URL}/rest/v1/smc_signals?select=*&order=created_at.desc&limit=1000`, { headers: HDR }),
+        fetch(`${SB_URL}/rest/v1/paper_account?select=*&limit=1`, { headers: HDR }),
+      ]);
+      const [sigRaw, accRaw] = await Promise.all([sigRes.json(), accRes.json()]);
+      if (Array.isArray(sigRaw)) setSignals(sigRaw);
+      if (Array.isArray(accRaw) && accRaw.length) setAccount(accRaw[0]);
+    } catch (e) {
+      console.warn('Roadmap load error:', e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // ── Phase 1 gate metrics ─────────────────────────────────────────────────
+  const resolved = signals.filter(s => s.outcome != null);
+  const wins     = resolved.filter(s => s.outcome === 'tp1_hit' || s.outcome === 'tp2_hit');
+  const losses   = resolved.filter(s => s.outcome === 'sl_hit');
+  const decided  = wins.length + losses.length;
+
+  const totalTrades  = decided;
+  const winRate      = decided > 0 ? wins.length / decided : 0;
+
+  // Profit Factor = sum of winning R / sum of losing R (abs)
+  const grossProfit  = wins.reduce((s, x)   => s + Math.abs(x.outcome_pnl_r || 1), 0);
+  const grossLoss    = losses.reduce((s, x) => s + Math.abs(x.outcome_pnl_r || 1), 0);
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 99 : 0;
+
+  // Max Drawdown from equity snapshots via paper_account
+  const maxDD    = Math.abs(account.max_drawdown_pct || 0);
+  const balance  = account.balance || 10000;
+  const equity   = account.equity  || balance;
+  const dailyPnl = account.daily_pnl_usd || 0;
+
+  // Expectancy = (WR × avgWin) − (LR × avgLoss)
+  const avgWin  = wins.length > 0  ? grossProfit / wins.length  : 0;
+  const avgLoss = losses.length > 0 ? grossLoss  / losses.length : 0;
+  const expectancy = (winRate * avgWin) - ((1 - winRate) * avgLoss);
+
+  // Gate checks (Phase 1 → Phase 2)
+  const gateTrades = totalTrades >= 100;
+  const gatePF     = profitFactor >= 1.2;
+  const gateDD     = maxDD <= 15;
+  const gateAll    = gateTrades && gatePF && gateDD;
+
+  return (
+    <div style={{ minHeight: '100vh', background: C.bg, color: C.text }}>
+
+      {/* NAV */}
+      <div style={{ borderBottom: `1px solid ${C.border}`, background: 'rgba(6,7,16,0.96)', padding: '0 32px', position: 'sticky', top: 0, zIndex: 100 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 58 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg,${C.amber},#B85500)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 900 }}>✈</div>
+            <span style={{ fontWeight: 900, fontSize: 16, letterSpacing: '-0.03em' }}>PropPilot <span style={{ color: C.amber }}>AI</span></span>
+            <span style={{ color: C.muted, fontSize: 12, marginLeft: 4 }}>/ Roadmap</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a href="analytics.html" style={{ color: C.amber, fontSize: 13, fontWeight: 700, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.amber}30`, borderRadius: 7 }}>📊 Analytics</a>
+            <a href="index.html"     style={{ color: C.muted, fontSize: 13, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.border}`, borderRadius: 7 }}>← PropPilot OS</a>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1000, margin: '0 auto', padding: '0 28px' }}>
+
+        {/* HEADER */}
+        <div style={{ padding: '40px 0 32px' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '5px 16px',
+            background: 'rgba(245,166,35,0.09)', border: '1px solid rgba(245,166,35,0.22)',
+            borderRadius: 20, marginBottom: 16 }}>
+            <span style={{ color: C.amber, fontSize: 12, fontWeight: 700 }}>🗺 FROM DASHBOARD TO DOMINANCE — DEVELOPMENT ROADMAP</span>
+          </div>
+          <div style={{ fontSize: 38, fontWeight: 900, letterSpacing: '-0.03em', marginBottom: 10, lineHeight: 1.15 }}>
+            Three-Phase Path to <span style={{ color: C.amber }}>Prop Firm Dominance</span>
+          </div>
+          <div style={{ color: C.sub, fontSize: 15, lineHeight: 1.7, maxWidth: 680 }}>
+            Each phase builds on the last. No shortcuts — the gate criteria exist to protect capital and prove the edge is real before risking real money.
+          </div>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '80px 0' }}>
+            <div style={{ width: 32, height: 32, border: `3px solid ${C.border}`, borderTopColor: C.amber,
+              borderRadius: '50%', animation: 'spin 0.9s linear infinite', margin: '0 auto 16px' }}/>
+            <div style={{ color: C.sub }}>Loading live metrics…</div>
+          </div>
+        ) : (
+          <div className="fade-in">
+
+            {/* ── Live Phase Status Bar ── */}
+            <div style={{ ...cardS, marginBottom: 28, display: 'flex', flexWrap: 'wrap', gap: 20, alignItems: 'center' }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: C.muted, letterSpacing: '0.07em', flexShrink: 0 }}>LIVE PHASE 1 METRICS</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, flex: 1 }}>
+                {[
+                  { label: 'Trades',       value: totalTrades,            target: 100,  unit: '',  pass: gateTrades, color: C.teal   },
+                  { label: 'Profit Factor',value: profitFactor,           target: 1.2,  unit: 'x', pass: gatePF,     color: C.amber  },
+                  { label: 'Max DD',       value: maxDD,                  target: 15,   unit: '%', pass: gateDD,     color: C.indigo, invert: true },
+                  { label: 'Win Rate',     value: (winRate*100),          target: 0,    unit: '%', pass: winRate>=0.45, color: C.green  },
+                  { label: 'Expectancy',   value: expectancy,             target: 0,    unit: 'R', pass: expectancy>0,  color: C.purple },
+                ].map(m => (
+                  <div key={m.label} style={{ textAlign: 'center', minWidth: 70 }}>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: m.pass ? m.color : C.red }}>
+                      {typeof m.value === 'number' ? m.value.toFixed(m.value > 10 ? 0 : 2) : '—'}{m.unit}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.muted, marginTop: 2 }}>{m.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: '8px 18px', borderRadius: 10,
+                background: gateAll ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.10)',
+                border: `1px solid ${gateAll ? 'rgba(52,211,153,0.3)' : 'rgba(248,113,113,0.3)'}`,
+                fontSize: 12, fontWeight: 800, color: gateAll ? C.green : C.red, flexShrink: 0 }}>
+                {gateAll ? '🚀 GATE OPEN' : '🔒 GATE LOCKED'}
+              </div>
+            </div>
+
+            {/* ── PHASE 1 ── */}
+            <PhaseCard
+              phase="1" icon="📊" color={C.amber}
+              title="Paper Trading Foundation"
+              subtitle="Build edge evidence before touching real capital"
+              status="active"
+              gate={
+                <div>
+                  <GateCriterion icon="📊" label="Minimum 100 resolved trades (statistically significant sample)"
+                    current={totalTrades} target={100} pass={gateTrades} warn={totalTrades >= 60} />
+                  <GateCriterion icon="💎" label="Profit Factor ≥ 1.2  (gross win / gross loss R)"
+                    current={profitFactor} target={1.2} pass={gatePF} warn={profitFactor >= 0.9} />
+                  <GateCriterion icon="🛡" label="Max Drawdown ≤ 15%  (peak-to-trough on paper account)"
+                    current={maxDD} target={15} unit="%" pass={gateDD} warn={maxDD <= 20} />
+                </div>
+              }
+            >
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(200px,1fr))', gap: 10, marginBottom: 16 }}>
+                {[
+                  { done: true,  text: 'Signal Engine (9-indicator SMC analysis)' },
+                  { done: true,  text: 'Paper account with realistic P&L tracking' },
+                  { done: true,  text: 'DataFeed WebSocket → REST fallback' },
+                  { done: true,  text: 'Risk Engine — position sizing & kill-switch' },
+                  { done: true,  text: 'AI Coach (Groq Llama 3.3) session summaries' },
+                  { done: true,  text: 'MemoryManager → Supabase persistence' },
+                  { done: true,  text: 'Outcome tracking (TP1/TP2/SL resolution)' },
+                  { done: true,  text: 'Strategy stats aggregation table' },
+                  { done: true,  text: 'Analytics dashboard (win rate, equity curve)' },
+                  { done: false, text: 'Spread/slippage simulation in paper executor' },
+                  { done: false, text: 'Expectancy as primary KPI (analytics pillar)' },
+                  { done: false, text: 'Contextual win rate by session/time/setup' },
+                  { done: false, text: 'Drawdown pattern & clustering analysis' },
+                  { done: false, text: 'Prop firm rule matrix (FTMO/FundedNext)' },
+                ].map((f, i) => <Chip key={i} done={f.done}>{f.text}</Chip>)}
+              </div>
+
+              {/* Pillar cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(210px,1fr))', gap: 12 }}>
+                {[
+                  { icon: '🎯', title: 'Expectancy', color: C.purple,
+                    desc: 'E = (WR × AvgWin) − (LR × AvgLoss)\nPrimary KPI. Must be positive to prove real edge. Current: ' + (expectancy > 0 ? '+' : '') + expectancy.toFixed(3) + 'R' },
+                  { icon: '📐', title: 'R-Multiple Adherence', color: C.teal,
+                    desc: 'Track ratio of actual vs planned R. Are TPs being hit at expected levels? Measure execution quality.' },
+                  { icon: '🗺', title: 'Contextual Win Rate', color: C.indigo,
+                    desc: 'Win rate sliced by session (Asia/London/NY), time of day, and setup type. Find when the edge is sharpest.' },
+                  { icon: '📉', title: 'Drawdown Behaviour', color: C.red,
+                    desc: 'Losing streak length, clustering patterns, recovery time. Detect tilt/revenge trading before it compounds.' },
+                ].map(p => (
+                  <div key={p.title} style={{ padding: 16, background: `${p.color}08`, border: `1px solid ${p.color}20`, borderRadius: 12 }}>
+                    <div style={{ fontSize: 20, marginBottom: 8 }}>{p.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: p.color, marginBottom: 6 }}>{p.title}</div>
+                    <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.6, whiteSpace: 'pre-line' }}>{p.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </PhaseCard>
+
+            {/* ── PHASE 2 ── */}
+            <PhaseCard
+              phase="2" icon="⚡" color={C.blue}
+              title="Live Execution Bridge"
+              subtitle="Micro-lot live trading with prop firm rules enforced in real-time"
+              status="pending"
+              gate={
+                <div>
+                  <GateCriterion icon="🏦" label="FTMO / FundedNext challenge passed (simulated or real)"
+                    current={0} target={1} unit="" pass={false} />
+                  <GateCriterion icon="🔌" label="MT5 Python API bridge tested & stable"
+                    current={0} target={1} unit="" pass={false} />
+                  <GateCriterion icon="💰" label="Phase 1 gate all passed (inherited)"
+                    current={gateAll ? 1 : 0} target={1} unit="" pass={gateAll} />
+                </div>
+              }
+            >
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(200px,1fr))', gap: 10, marginBottom: 16 }}>
+                {[
+                  { done: false, text: 'MT5 Python API bridge (MetaTrader5 lib)' },
+                  { done: false, text: 'Micro-lot sizing (0.01 lot minimum)' },
+                  { done: false, text: 'Prop firm rule matrix — FTMO Standard' },
+                  { done: false, text: 'Prop firm rule matrix — FTMO Swing' },
+                  { done: false, text: 'Prop firm rule matrix — FundedNext Stellar' },
+                  { done: false, text: 'Prop firm rule matrix — FundedNext Express' },
+                  { done: false, text: 'News filter — 30-min embargo enforcement' },
+                  { done: false, text: 'Weekend hold detection & auto-close' },
+                  { done: false, text: 'Daily loss limit with hard kill-switch' },
+                  { done: false, text: 'Oanda REST fallback for forex pairs' },
+                  { done: false, text: 'Execution latency monitoring' },
+                  { done: false, text: 'Slippage log vs paper baseline' },
+                ].map((f, i) => <Chip key={i} done={f.done}>{f.text}</Chip>)}
+              </div>
+
+              {/* Prop Firm Rules Table */}
+              <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: C.muted, letterSpacing: '0.07em', marginBottom: 10 }}>📋 PROP FIRM RULE MATRIX</div>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                      {['Firm / Account','Max Daily DD','Max Total DD','News Filter','Weekend Hold','Min Days'].map(h => (
+                        <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: C.muted, fontWeight: 700, whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      ['FTMO Standard',     '5%', '10%', '±30 min',  'No',  '4'],
+                      ['FTMO Swing',        '5%', '10%', 'No filter','Yes', '4'],
+                      ['FundedNext Stellar','5%', '10%', '±30 min',  'No',  '5'],
+                      ['FundedNext Express','5%', '10%', 'No filter','Yes', '3'],
+                    ].map(([name, ...cols]) => (
+                      <tr key={name} style={{ borderBottom: `1px solid ${C.border}` }}>
+                        <td style={{ padding: '7px 10px', color: C.blue, fontWeight: 700 }}>{name}</td>
+                        {cols.map((c, i) => (
+                          <td key={i} style={{ padding: '7px 10px', color: C.sub }}>{c}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </PhaseCard>
+
+            {/* ── PHASE 3 ── */}
+            <PhaseCard
+              phase="3" icon="🧠" color={C.purple}
+              title="Advanced Analytics & Self-Correction"
+              subtitle="AI detects psychological biases and improves its own strategy"
+              status="pending"
+            >
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(200px,1fr))', gap: 10, marginBottom: 16 }}>
+                {[
+                  { done: false, text: 'Revenge trading detection (rapid reentry after SL)' },
+                  { done: false, text: 'FOMO detection (signal confidence drift)' },
+                  { done: false, text: 'Overtrading flag (>N signals per session)' },
+                  { done: false, text: 'AI psychology report — weekly bias summary' },
+                  { done: false, text: 'Chart replay viewer with AI decision overlay' },
+                  { done: false, text: 'Auto-adjust confidence threshold by session' },
+                  { done: false, text: 'Adaptive position sizing (Kelly-informed)' },
+                  { done: false, text: 'Regime detection (trending vs ranging)' },
+                  { done: false, text: 'Multi-TF confluence scoring upgrade' },
+                  { done: false, text: 'Strategy self-annotation from outcomes' },
+                  { done: false, text: 'Portfolio heat — correlated position limits' },
+                  { done: false, text: 'A/B test framework for signal variations' },
+                ].map((f, i) => <Chip key={i} done={f.done}>{f.text}</Chip>)}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 12, marginTop: 8 }}>
+                {[
+                  { icon: '🔍', title: 'Bias Detector', color: C.purple,
+                    desc: 'Identifies revenge trading, FOMO, overconfidence from trade sequence patterns and timing anomalies.' },
+                  { icon: '🎬', title: 'Chart Replay', color: C.indigo,
+                    desc: 'Replay any past signal bar-by-bar. AI overlay shows what the engine saw and why it triggered.' },
+                  { icon: '🤖', title: 'Self-Correction Loop', color: C.teal,
+                    desc: 'Groq AI reads outcome history weekly, identifies weak setups, proposes threshold adjustments.' },
+                  { icon: '📐', title: 'Kelly Sizing', color: C.amber,
+                    desc: 'Dynamic position sizing informed by empirical win rate and R-ratio per setup type. Replaces fixed % risk.' },
+                ].map(p => (
+                  <div key={p.title} style={{ padding: 16, background: `${p.color}08`, border: `1px solid ${p.color}20`, borderRadius: 12 }}>
+                    <div style={{ fontSize: 20, marginBottom: 8 }}>{p.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: p.color, marginBottom: 6 }}>{p.title}</div>
+                    <div style={{ fontSize: 11, color: C.sub, lineHeight: 1.6 }}>{p.desc}</div>
+                  </div>
+                ))}
+              </div>
+            </PhaseCard>
+
+            {/* ── Architecture Diagram (text-based) ── */}
+            <div style={{ ...card, marginBottom: 28 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 18 }}>🏗 System Architecture</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+                {[
+                  { icon: '🖥', label: 'Frontend (Vercel)', color: C.amber,
+                    items: ['index.html — OS Dashboard', 'analytics.html — Performance', 'signal.html — Signal viewer', 'bot.html — Bot Monitor', 'roadmap.html — This page', 'landing.html — Marketing'] },
+                  { icon: '🗄', label: 'State (Supabase)', color: C.teal,
+                    items: ['smc_signals — All signals', 'paper_account — Balance/equity', 'paper_positions — Open trades', 'bot_memory — AI summaries', 'strategy_stats — Aggregated KPIs', 'execution_log — Trade history'] },
+                  { icon: '⚙', label: 'Engine (VPS Daemon)', color: C.indigo,
+                    items: ['main.py — Orchestrator', 'signal_engine.py — 9 indicators', 'risk_engine.py — Sizing/limits', 'data_feed.py — WS/REST prices', 'execution_engine.py — Trades', 'ai_coach.py — Groq LLM'] },
+                ].map(col => (
+                  <div key={col.label} style={{ padding: 14, background: `${col.color}08`, border: `1px solid ${col.color}18`, borderRadius: 12 }}>
+                    <div style={{ fontSize: 18, marginBottom: 6 }}>{col.icon}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: col.color, marginBottom: 10 }}>{col.label}</div>
+                    {col.items.map(item => (
+                      <div key={item} style={{ fontSize: 11, color: C.sub, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: col.color, opacity: 0.5 }}>▸</span>{item}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Timeline strip ── */}
+            <div style={{ ...card, marginBottom: 40 }}>
+              <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 20 }}>⏱ Development Timeline</div>
+              <div style={{ position: 'relative', paddingLeft: 24 }}>
+                {/* Vertical line */}
+                <div style={{ position: 'absolute', left: 7, top: 0, bottom: 0, width: 2, background: `linear-gradient(${C.amber}, ${C.blue}, ${C.purple})`, borderRadius: 1 }}/>
+                {[
+                  { done: true,  label: 'Signal Engine v1 launched',         date: 'Apr 2026', color: C.amber  },
+                  { done: true,  label: 'Paper trading daemon live on VPS',   date: 'Apr 2026', color: C.amber  },
+                  { done: true,  label: 'Supabase persistence + Analytics',   date: 'Apr 2026', color: C.amber  },
+                  { done: false, label: 'Spread/slippage simulation',         date: 'May 2026', color: C.teal   },
+                  { done: false, label: '100-trade sample milestone',         date: 'May 2026', color: C.teal   },
+                  { done: false, label: 'Phase 1 gate pass → Phase 2 unlock',date: 'Jun 2026', color: C.blue   },
+                  { done: false, label: 'MT5 bridge + prop firm rules',       date: 'Jun 2026', color: C.blue   },
+                  { done: false, label: 'First live micro-lot trade',         date: 'Jul 2026', color: C.blue   },
+                  { done: false, label: 'Bias detector + chart replay',       date: 'Q4 2026', color: C.purple },
+                  { done: false, label: 'Self-correction loop active',        date: '2027',    color: C.purple },
+                ].map((ev, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16, position: 'relative' }}>
+                    <div style={{ position: 'absolute', left: -17, width: 12, height: 12, borderRadius: 6,
+                      background: ev.done ? ev.color : C.bg, border: `2px solid ${ev.color}`, flexShrink: 0 }}/>
+                    <div style={{ flex: 1, fontSize: 13, color: ev.done ? C.text : C.sub, fontWeight: ev.done ? 700 : 500 }}>{ev.label}</div>
+                    <div style={{ fontSize: 11, color: ev.done ? ev.color : C.muted, fontWeight: 700, flexShrink: 0 }}>{ev.date}</div>
+                    {ev.done && <span style={{ fontSize: 14 }}>✅</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Roadmap/>);
+</script>
+</body>
+</html>

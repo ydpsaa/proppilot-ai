@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PropPilot AI — The Prop Trading OS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body { background: #060710; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    a { text-decoration: none; color: inherit; }
+
+    /* ── Animations ── */
+    @keyframes fadeUp   { from{opacity:0;transform:translateY(28px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes glow     { 0%,100%{opacity:.6} 50%{opacity:1} }
+    @keyframes float    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+    @keyframes scanline { from{top:0%} to{top:100%} }
+    @keyframes pulse    { 0%,100%{box-shadow:0 0 0 0 rgba(245,166,35,0.5)} 50%{box-shadow:0 0 0 16px rgba(245,166,35,0)} }
+    @keyframes ticker   { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+
+    .fade-up { animation: fadeUp 0.7s ease forwards; }
+    .fade-up-d1 { animation: fadeUp 0.7s 0.1s ease both; }
+    .fade-up-d2 { animation: fadeUp 0.7s 0.2s ease both; }
+    .fade-up-d3 { animation: fadeUp 0.7s 0.3s ease both; }
+    .fade-up-d4 { animation: fadeUp 0.7s 0.4s ease both; }
+
+    /* ── Nav ── */
+    nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(6,7,16,0.85); backdrop-filter: blur(18px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 40px; height: 64px; }
+    .nav-logo { display:flex; align-items:center; gap:10; font-weight:900; font-size:19px; letter-spacing:-0.03em; }
+    .nav-logo-icon { width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#F5A623,#B85500);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900; }
+    .nav-links { display:flex; gap:28px; }
+    .nav-links a { color: rgba(255,255,255,0.55); font-size: 14px; font-weight: 500; transition: color 0.2s; }
+    .nav-links a:hover { color: #fff; }
+    .nav-cta { display:flex; gap:10; align-items:center; }
+    .btn-ghost { padding: 8px 18px; border: 1px solid rgba(255,255,255,0.14); border-radius: 9px; font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.7); cursor: pointer; background: transparent; transition: all 0.2s; }
+    .btn-ghost:hover { border-color: rgba(255,255,255,0.3); color: #fff; }
+    .btn-primary { padding: 9px 22px; border: none; border-radius: 9px; font-size: 14px; font-weight: 800; color: #000; cursor: pointer; background: linear-gradient(135deg,#F5A623,#C96000); transition: all 0.2s; }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 28px rgba(245,166,35,0.35); }
+
+    /* ── Hero ── */
+    .hero { min-height: 100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      padding: 120px 24px 80px; text-align: center; position:relative; overflow:hidden; }
+    .hero-bg { position:absolute;inset:0;background:radial-gradient(ellipse 70% 60% at 50% 0%, rgba(245,166,35,0.08) 0%,transparent 70%),radial-gradient(ellipse 40% 40% at 20% 60%,rgba(129,140,248,0.06) 0%,transparent 60%); }
+    .hero-grid { position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,0.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.025) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(ellipse 80% 60% at 50% 30%,black 30%,transparent 80%); }
+    .hero-badge { display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.3);border-radius:100px;font-size:13px;font-weight:700;color:#F5A623;margin-bottom:28px; }
+    .hero-badge .dot { width:7px;height:7px;border-radius:50%;background:#F5A623;animation:pulse 2s ease-in-out infinite; }
+    .hero-title { font-size: clamp(38px,7vw,80px); font-weight: 900; line-height: 1.05; letter-spacing: -0.04em; max-width: 800px; margin-bottom: 24px; }
+    .hero-title .highlight { background: linear-gradient(135deg,#F5A623,#FBBF24); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+    .hero-sub { font-size: clamp(16px,2vw,20px); color: rgba(255,255,255,0.5); max-width: 560px; line-height: 1.7; margin-bottom: 40px; }
+    .hero-cta { display:flex;gap:14px;flex-wrap:wrap;justify-content:center; margin-bottom:60px; }
+    .btn-hero { padding: 16px 36px; border:none; border-radius:12px; font-size:16px; font-weight:900; color:#000; cursor:pointer; background:linear-gradient(135deg,#F5A623,#C96000); letter-spacing:0.02em; transition:all 0.2s; }
+    .btn-hero:hover { transform:translateY(-2px); box-shadow:0 12px 40px rgba(245,166,35,0.4); }
+    .btn-hero-ghost { padding:15px 34px;border:1px solid rgba(255,255,255,0.15);border-radius:12px;font-size:16px;font-weight:700;color:rgba(255,255,255,0.8);cursor:pointer;background:transparent;transition:all 0.2s; }
+    .btn-hero-ghost:hover { border-color:rgba(255,255,255,0.35);color:#fff; }
+    .hero-note { color:rgba(255,255,255,0.3); font-size:13px; }
+
+    /* ── Ticker ── */
+    .ticker { background:rgba(255,255,255,0.03); border-top:1px solid rgba(255,255,255,0.06); border-bottom:1px solid rgba(255,255,255,0.06); padding:14px 0; overflow:hidden; }
+    .ticker-inner { display:flex;gap:48px;white-space:nowrap;animation:ticker 28s linear infinite; }
+    .ticker-item { display:flex;align-items:center;gap:10;font-size:13px; }
+    .ticker-sym { font-weight:800;color:#F1F5F9; }
+    .ticker-price { color:rgba(255,255,255,0.5); }
+    .ticker-chg { font-weight:700; }
+
+    /* ── App preview ── */
+    .preview { padding:80px 24px; max-width:1100px;margin:0 auto; }
+    .preview-screen { border-radius:20px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);box-shadow:0 40px 120px rgba(0,0,0,0.8),0 0 0 1px rgba(255,255,255,0.05),inset 0 1px 0 rgba(255,255,255,0.1); background:#0C0E1B;position:relative; }
+    .preview-bar { background:rgba(255,255,255,0.04);padding:14px 20px;display:flex;align-items:center;gap:10;border-bottom:1px solid rgba(255,255,255,0.06); }
+    .preview-dot { width:12px;height:12px;border-radius:6px; }
+    .preview-content { padding:28px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16; }
+    .pc { background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:20px; }
+    .pc-label { font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px; }
+    .pc-val { font-size:28px;font-weight:900; }
+    .pc-bar { height:6px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden;margin-top:12px; }
+    .pc-fill { height:100%;border-radius:3px; }
+    .pc-badge { display:inline-block;padding:3px 10px;border-radius:6px;font-size:11px;font-weight:700;margin-top:8px; }
+
+    /* ── Features ── */
+    .features { padding:100px 24px;max-width:1100px;margin:0 auto; }
+    .section-label { font-size:12px;font-weight:700;letter-spacing:0.12em;color:#F5A623;text-transform:uppercase;margin-bottom:16px; }
+    .section-title { font-size:clamp(28px,4vw,48px);font-weight:900;letter-spacing:-0.03em;line-height:1.1;margin-bottom:16px; }
+    .section-sub { font-size:17px;color:rgba(255,255,255,0.45);line-height:1.7;max-width:520px; }
+    .features-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:20;margin-top:60px; }
+    .feat-card { background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:18px;padding:28px;transition:all 0.2s; }
+    .feat-card:hover { background:rgba(255,255,255,0.05);border-color:rgba(245,166,35,0.2);transform:translateY(-3px); }
+    .feat-icon { width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:18px; }
+    .feat-title { font-size:17px;font-weight:800;margin-bottom:10px; }
+    .feat-desc { font-size:14px;color:rgba(255,255,255,0.45);line-height:1.7; }
+
+    /* ── Firms ── */
+    .firms { padding:60px 24px;max-width:1100px;margin:0 auto;text-align:center; }
+    .firms-title { font-size:14px;font-weight:600;color:rgba(255,255,255,0.35);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:32px; }
+    .firms-grid { display:flex;flex-wrap:wrap;gap:14;justify-content:center; }
+    .firm-pill { padding:10px 20px;border:1px solid rgba(255,255,255,0.1);border-radius:100px;font-size:14px;font-weight:700;color:rgba(255,255,255,0.5);background:rgba(255,255,255,0.03);transition:all 0.2s; }
+    .firm-pill:hover { border-color:rgba(245,166,35,0.4);color:#F5A623; }
+
+    /* ── How it works ── */
+    .how { padding:100px 24px;max-width:1000px;margin:0 auto; }
+    .steps { display:grid;grid-template-columns:repeat(3,1fr);gap:32;margin-top:56px; }
+    .step { text-align:center;padding:32px 24px; }
+    .step-num { width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,rgba(245,166,35,0.15),rgba(245,166,35,0.05));border:1px solid rgba(245,166,35,0.3);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:900;color:#F5A623;margin:0 auto 20px; }
+    .step-title { font-size:18px;font-weight:800;margin-bottom:10px; }
+    .step-desc { font-size:14px;color:rgba(255,255,255,0.45);line-height:1.7; }
+    .step-connector { position:absolute;top:28px;right:-50%;width:100%;height:1px;background:linear-gradient(90deg,rgba(245,166,35,0.3),transparent); }
+
+    /* ── Pricing ── */
+    .pricing { padding:100px 24px;max-width:1000px;margin:0 auto;text-align:center; }
+    .pricing-grid { display:grid;grid-template-columns:1fr 1fr 1fr;gap:20;margin-top:56px;text-align:left; }
+    .price-card { background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:32px;transition:all 0.2s; }
+    .price-card.featured { background:rgba(245,166,35,0.06);border-color:rgba(245,166,35,0.35);position:relative;transform:scale(1.03); }
+    .price-card.featured::before { content:'MOST POPULAR';position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#F5A623,#C96000);color:#000;font-size:11px;font-weight:900;padding:4px 14px;border-radius:100px;letter-spacing:0.08em; }
+    .plan-name { font-size:13px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin-bottom:12px; }
+    .plan-price { font-size:44px;font-weight:900;letter-spacing:-0.04em;margin-bottom:4px; }
+    .plan-price span { font-size:18px;font-weight:500;color:rgba(255,255,255,0.4); }
+    .plan-period { font-size:14px;color:rgba(255,255,255,0.35);margin-bottom:28px; }
+    .plan-divider { height:1px;background:rgba(255,255,255,0.07);margin:24px 0; }
+    .plan-feature { display:flex;align-items:center;gap:10;font-size:14px;color:rgba(255,255,255,0.6);margin-bottom:12px; }
+    .plan-feature .check { color:#34D399;font-weight:700;flex-shrink:0; }
+    .plan-feature .cross { color:rgba(255,255,255,0.2);flex-shrink:0; }
+    .plan-btn { width:100%;padding:13px;border:none;border-radius:10px;font-size:14px;font-weight:800;cursor:pointer;margin-top:24px;transition:all 0.2s; }
+    .plan-btn.featured-btn { background:linear-gradient(135deg,#F5A623,#C96000);color:#000; }
+    .plan-btn.featured-btn:hover { box-shadow:0 8px 28px rgba(245,166,35,0.35); }
+    .plan-btn.ghost-btn { background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.7); }
+    .plan-btn.ghost-btn:hover { background:rgba(255,255,255,0.08); }
+
+    /* ── Compare ── */
+    .compare { padding:80px 24px;max-width:900px;margin:0 auto; }
+    .compare-table { width:100%;border-collapse:collapse;margin-top:40px; }
+    .compare-table th { font-size:13px;font-weight:700;color:rgba(255,255,255,0.35);text-align:left;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08); }
+    .compare-table th:not(:first-child) { text-align:center; }
+    .compare-table td { padding:14px 16px;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:rgba(255,255,255,0.6); }
+    .compare-table td:not(:first-child) { text-align:center;font-weight:700; }
+    .compare-table tr:hover td { background:rgba(255,255,255,0.02); }
+    .c-yes { color:#34D399; }
+    .c-no  { color:rgba(255,255,255,0.18); }
+    .c-pp  { color:#F5A623; }
+
+    /* ── CTA ── */
+    .cta-section { padding:100px 24px;text-align:center;position:relative;overflow:hidden; }
+    .cta-bg { position:absolute;inset:0;background:radial-gradient(ellipse 60% 60% at 50% 50%,rgba(245,166,35,0.07) 0%,transparent 70%); }
+    .cta-title { font-size:clamp(32px,5vw,60px);font-weight:900;letter-spacing:-0.04em;margin-bottom:20px;line-height:1.08; }
+    .cta-sub { font-size:18px;color:rgba(255,255,255,0.45);margin-bottom:48px; }
+
+    /* ── Footer ── */
+    footer { border-top:1px solid rgba(255,255,255,0.07);padding:40px 40px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16; }
+    .footer-copy { color:rgba(255,255,255,0.25);font-size:13px; }
+    .footer-links { display:flex;gap:24; }
+    .footer-links a { color:rgba(255,255,255,0.3);font-size:13px;transition:color 0.2s; }
+    .footer-links a:hover { color:rgba(255,255,255,0.7); }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      nav { padding: 0 16px; }
+      .nav-links { display:none; }
+      .hero { padding: 100px 16px 60px; }
+      .features-grid, .steps, .pricing-grid { grid-template-columns:1fr; }
+      .price-card.featured { transform:none; }
+      .preview-content { grid-template-columns:1fr; }
+      .compare { overflow-x:auto; }
+      footer { flex-direction:column;align-items:flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── NAV ── -->
+<nav>
+  <a href="index.html" class="nav-logo">
+    <div class="nav-logo-icon">✈</div>
+    PropPilot <span style="color:#F5A623">AI</span>
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#firms">Firms</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#compare">Compare</a>
+  </div>
+  <div class="nav-cta">
+    <button class="btn-ghost" onclick="location.href='index.html'">Log In</button>
+    <button class="btn-primary" onclick="location.href='index.html'">Start Free →</button>
+  </div>
+</nav>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-grid"></div>
+
+  <div class="hero-badge fade-up">
+    <div class="dot"></div>
+    AI-Powered · Live Market Data · 6 Prop Firms
+  </div>
+
+  <h1 class="hero-title fade-up-d1">
+    The Operating System<br>for <span class="highlight">Prop Traders</span>
+  </h1>
+
+  <p class="hero-sub fade-up-d2">
+    Real-time trade analysis, challenge tracking, risk engine, and AI coaching — built specifically for FTMO, FundedNext, The5ers and more.
+  </p>
+
+  <div class="hero-cta fade-up-d3">
+    <button class="btn-hero" onclick="location.href='index.html'">Launch App Free →</button>
+    <button class="btn-hero-ghost" onclick="location.href='signal.html'">Try Signal Engine</button>
+  </div>
+
+  <p class="hero-note fade-up-d4">No credit card required · Works with all major prop firms</p>
+</section>
+
+<!-- ── TICKER ── -->
+<div class="ticker">
+  <div class="ticker-inner" id="ticker">
+    <!-- populated by JS -->
+  </div>
+</div>
+
+<!-- ── APP PREVIEW ── -->
+<section class="preview">
+  <div style="text-align:center;margin-bottom:48px">
+    <div class="section-label fade-up">The Dashboard</div>
+    <h2 class="section-title fade-up-d1" style="margin:0 auto">Everything in one view</h2>
+  </div>
+
+  <div class="preview-screen fade-up-d2">
+    <div class="preview-bar">
+      <div class="preview-dot" style="background:#FF5F57"></div>
+      <div class="preview-dot" style="background:#FEBC2E"></div>
+      <div class="preview-dot" style="background:#28C840"></div>
+      <div style="flex:1;text-align:center;font-size:12px;color:rgba(255,255,255,0.25)">PropPilot AI · Dashboard</div>
+      <div style="width:8px;height:8px;border-radius:4px;background:#34D399;box-shadow:0 0 8px #34D399"></div>
+      <span style="font-size:11px;color:#34D399;font-weight:700">LIVE</span>
+    </div>
+    <div class="preview-content">
+      <div class="pc" style="grid-column:1/2">
+        <div class="pc-label">Session Mode</div>
+        <div class="pc-val" style="color:#34D399">GO</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:6px">Daily buffer healthy</div>
+        <div class="pc-bar" style="margin-top:14px"><div class="pc-fill" style="width:23%;background:#34D399"></div></div>
+      </div>
+      <div class="pc" style="grid-column:2/3">
+        <div class="pc-label">XAU/USD — Live</div>
+        <div class="pc-val" style="color:#F5A623">2,318.40</div>
+        <span class="pc-badge" style="background:rgba(52,211,153,0.15);color:#34D399">▲ LONG</span>
+        <div style="font-size:11px;color:rgba(255,255,255,0.25);margin-top:8px">H4 BOS confirmed above 2,305</div>
+      </div>
+      <div class="pc" style="grid-column:3/4">
+        <div class="pc-label">Current P&L</div>
+        <div class="pc-val" style="color:#34D399">+$2,340</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:6px">+2.34% of target</div>
+        <div class="pc-bar" style="margin-top:14px"><div class="pc-fill" style="width:23%;background:linear-gradient(90deg,#F5A62388,#F5A623)"></div></div>
+      </div>
+      <div class="pc" style="grid-column:1/3">
+        <div class="pc-label">Challenge Progress — FTMO Step 1</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <span style="font-size:20px;font-weight:800;color:#F5A623">23.4% complete</span>
+          <span style="font-size:13px;color:rgba(255,255,255,0.4)">$7,660 remaining</span>
+        </div>
+        <div class="pc-bar" style="height:10px"><div class="pc-fill" style="width:23%;background:linear-gradient(90deg,#F5A62366,#F5A623)"></div></div>
+      </div>
+      <div class="pc" style="grid-column:3/4">
+        <div class="pc-label">Next High-Impact Event</div>
+        <div style="font-size:15px;font-weight:700;color:#F1F5F9;margin-bottom:6px">CPI (USD)</div>
+        <span class="pc-badge" style="background:rgba(248,113,113,0.15);color:#F87171">HIGH IMPACT</span>
+        <div style="font-size:11px;color:rgba(255,255,255,0.25);margin-top:8px">Today 14:30 UTC</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FEATURES ── -->
+<section class="features" id="features">
+  <div class="section-label">Features</div>
+  <h2 class="section-title">Not a signal service.<br>An operating system.</h2>
+  <p class="section-sub">Everything a prop trader needs to pass, stay funded, and grow — in a single unified tool.</p>
+
+  <div class="features-grid">
+    <div class="feat-card">
+      <div class="feat-icon" style="background:rgba(245,166,35,0.12)">🔍</div>
+      <div class="feat-title">Live Trade Analyzer</div>
+      <div class="feat-desc">Select any instrument + bias and get real-time analysis using EMA, RSI, MACD, Bollinger Bands and ATR. Calculated on live H1 candles, not pre-written scripts.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon" style="background:rgba(52,211,153,0.12)">🚀</div>
+      <div class="feat-title">Challenge Tracker</div>
+      <div class="feat-desc">Full challenge OS for FTMO, FundedNext, The5ers, MyFundedFx, E8 Markets and more. Track profit target, daily limits, max drawdown, and trading days in real time.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon" style="background:rgba(129,140,248,0.12)">📰</div>
+      <div class="feat-title">News Risk Engine</div>
+      <div class="feat-desc">Automatically checks which high-impact events are within 6 hours of your trade. Adjusts position size recommendations and compliance warnings accordingly.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon" style="background:rgba(248,113,113,0.12)">🛡</div>
+      <div class="feat-title">Compliance Guard</div>
+      <div class="feat-desc">Every trade is checked against your firm's specific rules — news restrictions, daily limits, weekend holding. Get a COMPLIANT or WARNING before you enter.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon" style="background:rgba(251,191,36,0.12)">📊</div>
+      <div class="feat-title">AI Trading Journal</div>
+      <div class="feat-desc">Log trades and get AI coaching on every entry. Equity curve, win rate, expectancy, streak, and discipline score. Identifies patterns like revenge trading and FOMO.</div>
+    </div>
+    <div class="feat-card">
+      <div class="feat-icon" style="background:rgba(20,184,166,0.12)">⚡</div>
+      <div class="feat-title">Signal Engine</div>
+      <div class="feat-desc">Deep technical scanner for XAU/USD, EUR/USD, GBP/USD, NAS100 and USD/JPY. Backtested signals with 6-month historical performance data shown in real time.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FIRMS ── -->
+<section class="firms" id="firms">
+  <div class="firms-title">Supported Prop Firms</div>
+  <div class="firms-grid">
+    <div class="firm-pill">🟢 FTMO</div>
+    <div class="firm-pill">🔵 FundedNext</div>
+    <div class="firm-pill">🟣 MyFundedFx</div>
+    <div class="firm-pill">🟡 The5ers</div>
+    <div class="firm-pill">🔴 E8 Markets</div>
+    <div class="firm-pill">🟩 True Forex Funds</div>
+    <div class="firm-pill" style="border-style:dashed;opacity:0.5">+ More soon</div>
+  </div>
+</section>
+
+<!-- ── HOW IT WORKS ── -->
+<section class="how">
+  <div style="text-align:center;margin-bottom:8px">
+    <div class="section-label">How it works</div>
+    <h2 class="section-title" style="margin:0 auto">Three steps to full control</h2>
+  </div>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-title">Connect Your Challenge</div>
+      <div class="step-desc">Choose your prop firm, plan, and account size. We load your exact profit targets, daily limits, max drawdown, and rules automatically.</div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-title">Analyze Before You Trade</div>
+      <div class="step-desc">Pick an instrument and bias. Get live TA analysis, news risk assessment, and a compliance check — all in under 2 seconds.</div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-title">Log & Improve</div>
+      <div class="step-desc">Track every trade in the AI journal. Identify patterns, measure discipline, and get coached on mistakes before they blow your account.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ── COMPARE ── -->
+<section class="compare" id="compare">
+  <div style="text-align:center">
+    <div class="section-label">Comparison</div>
+    <h2 class="section-title" style="margin:0 auto">vs. the alternatives</h2>
+  </div>
+  <table class="compare-table">
+    <thead>
+      <tr>
+        <th>Feature</th>
+        <th style="color:#F5A623">PropPilot AI</th>
+        <th>Tickrad</th>
+        <th>Prop Firm Dashboards</th>
+        <th>TradingView</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>Live TA engine (EMA/RSI/MACD/BB)</td><td class="c-pp">✓</td><td class="c-yes">✓</td><td class="c-no">✗</td><td class="c-yes">✓</td></tr>
+      <tr><td>Challenge tracker per firm</td><td class="c-pp">✓</td><td class="c-no">✗</td><td class="c-yes">partial</td><td class="c-no">✗</td></tr>
+      <tr><td>Firm-specific rules engine</td><td class="c-pp">✓</td><td class="c-no">✗</td><td class="c-no">✗</td><td class="c-no">✗</td></tr>
+      <tr><td>News risk per trade</td><td class="c-pp">✓</td><td class="c-yes">✓</td><td class="c-no">✗</td><td class="c-no">✗</td></tr>
+      <tr><td>Compliance check before entry</td><td class="c-pp">✓</td><td class="c-no">✗</td><td class="c-no">✗</td><td class="c-no">✗</td></tr>
+      <tr><td>AI coaching journal</td><td class="c-pp">✓</td><td class="c-no">✗</td><td class="c-no">✗</td><td class="c-no">✗</td></tr>
+      <tr><td>Equity curve + expectancy</td><td class="c-pp">✓</td><td class="c-no">✗</td><td class="c-no">✗</td><td class="c-yes">✓</td></tr>
+      <tr><td>6 prop firms in one place</td><td class="c-pp">✓</td><td class="c-no">✗</td><td class="c-no">✗</td><td class="c-no">✗</td></tr>
+      <tr><td>Free tier available</td><td class="c-pp">✓</td><td class="c-no">✗</td><td class="c-yes">✓</td><td class="c-yes">partial</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ── PRICING ── -->
+<section class="pricing" id="pricing">
+  <div class="section-label">Pricing</div>
+  <h2 class="section-title" style="margin:0 auto">Simple, honest pricing</h2>
+  <p class="section-sub" style="margin:12px auto 0">Start free. Upgrade when you're ready.</p>
+
+  <div class="pricing-grid">
+    <!-- Free -->
+    <div class="price-card">
+      <div class="plan-name">Free</div>
+      <div class="plan-price">$0<span>/mo</span></div>
+      <div class="plan-period">Forever free</div>
+      <div class="plan-divider"></div>
+      <div class="plan-feature"><span class="check">✓</span> Dashboard + live prices</div>
+      <div class="plan-feature"><span class="check">✓</span> Challenge tracker (1 firm)</div>
+      <div class="plan-feature"><span class="check">✓</span> Check Trade (3/day)</div>
+      <div class="plan-feature"><span class="check">✓</span> AI Journal (10 trades)</div>
+      <div class="plan-feature"><span class="cross">—</span> <span style="opacity:.35">Signal Engine</span></div>
+      <div class="plan-feature"><span class="cross">—</span> <span style="opacity:.35">Unlimited analysis</span></div>
+      <div class="plan-feature"><span class="cross">—</span> <span style="opacity:.35">Multi-account</span></div>
+      <button class="plan-btn ghost-btn" onclick="location.href='index.html'">Get Started Free</button>
+    </div>
+
+    <!-- Pro -->
+    <div class="price-card featured">
+      <div class="plan-name" style="color:#F5A623">Pro</div>
+      <div class="plan-price" style="color:#F5A623">$19<span>/mo</span></div>
+      <div class="plan-period">Billed monthly</div>
+      <div class="plan-divider"></div>
+      <div class="plan-feature"><span class="check">✓</span> Everything in Free</div>
+      <div class="plan-feature"><span class="check">✓</span> Unlimited trade analysis</div>
+      <div class="plan-feature"><span class="check">✓</span> All 6 prop firms</div>
+      <div class="plan-feature"><span class="check">✓</span> Signal Engine access</div>
+      <div class="plan-feature"><span class="check">✓</span> Unlimited journal</div>
+      <div class="plan-feature"><span class="check">✓</span> Real-time news alerts</div>
+      <div class="plan-feature"><span class="cross">—</span> <span style="opacity:.35">Multi-account (3)</span></div>
+      <button class="plan-btn featured-btn" onclick="location.href='index.html'">Start 7-Day Free Trial</button>
+    </div>
+
+    <!-- Elite -->
+    <div class="price-card">
+      <div class="plan-name">Elite</div>
+      <div class="plan-price">$49<span>/mo</span></div>
+      <div class="plan-period">Billed monthly</div>
+      <div class="plan-divider"></div>
+      <div class="plan-feature"><span class="check">✓</span> Everything in Pro</div>
+      <div class="plan-feature"><span class="check">✓</span> Up to 10 accounts</div>
+      <div class="plan-feature"><span class="check">✓</span> Priority news alerts</div>
+      <div class="plan-feature"><span class="check">✓</span> Scaling plan tracker</div>
+      <div class="plan-feature"><span class="check">✓</span> Discord community</div>
+      <div class="plan-feature"><span class="check">✓</span> Early access features</div>
+      <div class="plan-feature"><span class="check">✓</span> API access (coming)</div>
+      <button class="plan-btn ghost-btn" onclick="location.href='index.html'">Get Elite</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ── -->
+<section class="cta-section">
+  <div class="cta-bg"></div>
+  <h2 class="cta-title">Ready to stop guessing<br>and start <span style="color:#F5A623">passing challenges?</span></h2>
+  <p class="cta-sub">Join traders using PropPilot AI to track challenges, analyze trades, and protect their funded accounts.</p>
+  <button class="btn-hero" onclick="location.href='index.html'" style="font-size:18px;padding:18px 48px">
+    Launch PropPilot AI — Free →
+  </button>
+</section>
+
+<!-- ── FOOTER ── -->
+<footer>
+  <div class="nav-logo">
+    <div class="nav-logo-icon">✈</div>
+    PropPilot <span style="color:#F5A623">AI</span>
+  </div>
+  <div class="footer-copy">© 2026 PropPilot AI. Not financial advice.</div>
+  <div class="footer-links">
+    <a href="index.html">App</a>
+    <a href="signal.html">Signals</a>
+    <a href="bot.html">Bot Monitor</a>
+    <a href="analytics.html">Analytics</a>
+    <a href="live.html">Live Chart</a>
+    <a href="roadmap.html">Roadmap</a>
+  </div>
+</footer>
+
+<script>
+// ── Live ticker simulation ──
+const TICKERS = [
+  { sym:'XAU/USD', price:'2,318.40', chg:'+0.34%', bull:true },
+  { sym:'EUR/USD', price:'1.0847',   chg:'-0.12%', bull:false },
+  { sym:'GBP/USD', price:'1.2761',   chg:'+0.21%', bull:true },
+  { sym:'NAS100',  price:'17,842',   chg:'+0.67%', bull:true },
+  { sym:'USD/JPY', price:'152.48',   chg:'+0.08%', bull:true },
+  { sym:'BTC/USD', price:'68,240',   chg:'+1.24%', bull:true },
+  { sym:'SPX500',  price:'5,124',    chg:'-0.18%', bull:false },
+  { sym:'GBP/JPY', price:'194.62',   chg:'+0.33%', bull:true },
+];
+
+// Duplicate for infinite scroll
+const all = [...TICKERS, ...TICKERS];
+const ticker = document.getElementById('ticker');
+ticker.innerHTML = all.map(t => `
+  <div class="ticker-item">
+    <span class="ticker-sym">${t.sym}</span>
+    <span class="ticker-price">${t.price}</span>
+    <span class="ticker-chg" style="color:${t.bull?'#34D399':'#F87171'}">${t.chg}</span>
+  </div>
+`).join('');
+
+// Try to fetch live prices
+fetch('https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/prices')
+  .then(r => r.json())
+  .then(d => {
+    if (!d.prices) return;
+    const map = { 'XAU/USD':'XAU/USD','EUR/USD':'EUR/USD','GBP/USD':'GBP/USD','NAS100':'NAS100','USD/JPY':'USD/JPY' };
+    TICKERS.forEach(t => {
+      const lp = d.prices[map[t.sym]];
+      if (lp) t.price = lp.toLocaleString('en-US', { maximumFractionDigits: t.sym.includes('USD/JPY')||t.sym==='NAS100'?2:4 });
+    });
+    const allUpdated = [...TICKERS, ...TICKERS];
+    ticker.innerHTML = allUpdated.map(t => `
+      <div class="ticker-item">
+        <span class="ticker-sym">${t.sym}</span>
+        <span class="ticker-price">${t.price}</span>
+        <span class="ticker-chg" style="color:${t.bull?'#34D399':'#F87171'}">${t.chg}</span>
+      </div>
+    `).join('');
+  }).catch(() => {});
+
+// ── Intersection observer for fade animations ──
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.style.opacity = '1';
+      e.target.style.transform = 'translateY(0)';
+    }
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('.feat-card, .step, .price-card, .compare-table tr').forEach(el => {
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(20px)';
+  el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+  observer.observe(el);
+});
+</script>
+</body>
+</html>
