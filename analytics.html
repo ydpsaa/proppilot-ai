@@ -4,16 +4,18 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>PropPilot — Analytics</title>
+  <link rel="icon" href="data:,"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.2/dist/umd/supabase.min.js"></script>
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { min-height: 100%; }
-    body { background: #060710; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    body { background: #0B0F19; color: #F8FAFC; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
     @keyframes spin   { to { transform: rotate(360deg); } }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
@@ -34,21 +36,33 @@ const { useState, useEffect, useRef, useCallback } = React;
 const SB_URL = 'https://nxiednydxyrtxpkmgtof.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
 const HDR = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` };
+const sbClient = (() => {
+  try { return window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null; }
+  catch (e) { console.warn('Supabase client unavailable', e); return null; }
+})();
 
 const C = {
-  amber:'#F5A623', green:'#34D399', red:'#F87171', yellow:'#FBBF24',
-  indigo:'#818CF8', teal:'#2DD4BF', purple:'#A78BFA',
-  bg:'#060710', text:'#F1F5F9', sub:'#94A3B8', muted:'#475569',
-  border:'rgba(255,255,255,0.07)', surf:'rgba(255,255,255,0.04)',
+  amber:'#F59E0B', green:'#10B981', red:'#EF4444', yellow:'#F59E0B',
+  indigo:'#3B82F6', teal:'#14B8A6', purple:'#8B5CF6',
+  bg:'#0B0F19', text:'#F8FAFC', sub:'#94A3B8', muted:'#64748B',
+  border:'rgba(148,163,184,0.14)', surf:'rgba(21,26,37,0.82)',
 };
 
-const card  = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24 };
-const cardS = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 12, padding: 16 };
+const card  = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 8, padding: 24, backdropFilter:'blur(18px)' };
+const cardS = { background: C.surf, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16, backdropFilter:'blur(18px)' };
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const pct  = (v) => `${(v * 100).toFixed(1)}%`;
 const r2   = (v) => v == null ? '—' : v.toFixed(2);
 const rint = (v) => v == null ? '—' : Math.round(v);
+const timeAgo = (iso) => {
+  if (!iso) return '—';
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
+  return `${Math.floor(mins / 1440)}d ago`;
+};
 
 const STATE_COL = {
   LONG_NOW: '#34D399', SHORT_NOW: '#F87171',
@@ -237,6 +251,77 @@ function KPI({ icon, label, value, sub, color = C.amber }) {
   );
 }
 
+function SyncPill({ rtStatus, loadState, lastUpdate }) {
+  const state = loadState === 'updating' ? 'Updating' : rtStatus === 'live' ? 'Synced' : rtStatus === 'error' ? 'Demo / Offline' : 'Updating';
+  const color = state === 'Synced' ? C.green : state === 'Demo / Offline' ? C.red : C.amber;
+  return (
+    <div style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'4px 10px', border:`1px solid ${color}30`, borderRadius:999, background:`${color}12`, fontSize:11, fontWeight:800, color }}>
+      <span style={{ width:7, height:7, borderRadius:'50%', background:color, boxShadow:`0 0 0 3px ${color}22` }}/>
+      <span>{state}</span>
+      {lastUpdate && <span style={{ color:C.sub, fontWeight:600 }}>{timeAgo(lastUpdate.toISOString())}</span>}
+    </div>
+  );
+}
+
+function SignalOutcomeFlow({ signals }) {
+  const counts = signals.reduce((acc, s) => {
+    acc[s.outcome] = (acc[s.outcome] || 0) + 1;
+    return acc;
+  }, { OPEN:0, TP1_HIT:0, TP2_HIT:0, SL_HIT:0, EXPIRED:0 });
+  const items = [
+    ['Signal', signals.length, C.indigo],
+    ['OPEN', counts.OPEN || 0, C.indigo],
+    ['TP1_HIT', counts.TP1_HIT || 0, C.green],
+    ['TP2_HIT', counts.TP2_HIT || 0, C.green],
+    ['SL_HIT', counts.SL_HIT || 0, C.red],
+    ['EXPIRED', counts.EXPIRED || 0, C.amber],
+  ];
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'repeat(6, minmax(0, 1fr))', gap:10 }}>
+      {items.map(([label, value, color], idx) => (
+        <div key={label} style={{ ...cardS, position:'relative', overflow:'hidden' }}>
+          <div style={{ color, fontSize:11, fontWeight:800, letterSpacing:'.04em' }}>{label}</div>
+          <div style={{ color:C.text, fontSize:24, fontWeight:900, marginTop:8 }}>{value}</div>
+          {idx < items.length - 1 && <div style={{ position:'absolute', right:-9, top:'50%', transform:'translateY(-50%)', color:'rgba(148,163,184,.28)', fontSize:22 }}>→</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DayHeatmap({ signals }) {
+  const byDay = {};
+  signals.filter(s => s.outcome !== 'OPEN').forEach(s => {
+    const key = new Date(s.outcome_at || s.created_at).toISOString().slice(0, 10);
+    if (!byDay[key]) byDay[key] = { pnl: 0, count: 0 };
+    byDay[key].pnl += s.pnl_r || 0;
+    byDay[key].count += 1;
+  });
+  const days = Array.from({ length: 28 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (27 - i));
+    const key = d.toISOString().slice(0, 10);
+    return { key, label: d.toLocaleDateString('en-GB', { month:'short', day:'numeric' }), ...(byDay[key] || {}) };
+  });
+  const maxAbs = Math.max(1, ...days.map(d => Math.abs(d.pnl || 0)));
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'repeat(7, minmax(0, 1fr))', gap:8 }}>
+      {days.map(day => {
+        const pnl = day.pnl || 0;
+        const alpha = 0.12 + (Math.abs(pnl) / maxAbs) * 0.56;
+        const bg = pnl > 0 ? `rgba(16,185,129,${alpha})` : pnl < 0 ? `rgba(239,68,68,${alpha})` : 'rgba(255,255,255,.04)';
+        return (
+          <div key={day.key} style={{ ...cardS, minHeight:68, padding:10, background:bg }}>
+            <div style={{ color:C.muted, fontSize:10 }}>{day.label}</div>
+            <div style={{ color:pnl >= 0 ? C.green : C.red, fontWeight:900, fontSize:13, marginTop:10 }}>{pnl > 0 ? '+' : ''}{pnl.toFixed(2)}R</div>
+            <div style={{ color:C.sub, fontSize:10, marginTop:6 }}>{day.count || 0} signals</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Empty State ────────────────────────────────────────────────────────────
 function EmptyState() {
   return (
@@ -268,35 +353,72 @@ function Analytics() {
   const [loading,    setLoading]    = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [activeTab,  setActiveTab]  = useState('overview'); // overview | setups | heatmap | pillars
+  const [rtStatus,   setRtStatus]   = useState('connecting');
+  const [loadState,  setLoadState]  = useState('idle');
 
   const load = useCallback(async () => {
+    setLoadState('updating');
     try {
       const [sigRes, statRes] = await Promise.all([
-        fetch(`${SB_URL}/rest/v1/smc_signals?select=*&order=created_at.desc&limit=500`, { headers: HDR }),
-        fetch(`${SB_URL}/rest/v1/strategy_stats?select=*&order=expectancy.desc`, { headers: HDR }),
+        fetch(`${SB_URL}/rest/v1/signal_analyses?select=*&order=created_at.desc&limit=500`, { headers: HDR }),
+        fetch(`${SB_URL}/rest/v1/strategy_stats?select=*&order=expectancy.desc,total_signals.desc`, { headers: HDR }),
       ]);
       const [sigRaw, statData] = await Promise.all([sigRes.json(), statRes.json()]);
-      // Normalize smc_signals → analytics format
+      // Normalize signal_analyses -> analytics format
       const sigData = Array.isArray(sigRaw) ? sigRaw.map(s => ({
         ...s,
-        signal_state: s.verdict,
-        outcome:      s.outcome == null ? 'OPEN' : s.outcome.toUpperCase().replace('_HIT', '_HIT'),
-        pnl_r:        s.outcome_pnl_r,
-        session_name: s.session_name || s.session_ctx || '—',
+        signal_state: s.signal_state || 'NO_TRADE',
+        direction:    s.direction || (s.signal_state === 'LONG_NOW' || s.signal_state === 'WAIT_LONG' ? 'LONG' : s.signal_state === 'SHORT_NOW' || s.signal_state === 'WAIT_SHORT' ? 'SHORT' : null),
+        outcome:      s.outcome || 'OPEN',
+        pnl_r:        s.pnl_r == null ? null : Number(s.pnl_r),
+        price:        s.price == null ? null : Number(s.price),
+        tp1:          s.tp1 == null ? null : Number(s.tp1),
+        tp2:          s.tp2 == null ? null : Number(s.tp2),
+        sl:           s.sl == null ? null : Number(s.sl),
+        mfe_r:        s.mfe_r == null ? null : Number(s.mfe_r),
+        mae_r:        s.mae_r == null ? null : Number(s.mae_r),
+        session_name: s.session_name || 'Unknown',
       })) : [];
-      if (sigData.length)          setSignals(sigData);
-      if (Array.isArray(statData)) setStats(statData);
+      const statRows = Array.isArray(statData) ? statData.map(s => ({
+        ...s,
+        total_signals:  Number(s.total_signals || 0),
+        open_signals:   Number(s.open_signals || 0),
+        wins:           Number(s.wins || 0),
+        losses:         Number(s.losses || 0),
+        expired:        Number(s.expired || 0),
+        win_rate:       Number(s.win_rate || 0),
+        avg_pnl_r:      s.avg_pnl_r == null ? null : Number(s.avg_pnl_r),
+        expectancy:     Number(s.expectancy || 0),
+        avg_mfe:        s.avg_mfe == null ? null : Number(s.avg_mfe),
+        avg_mae:        s.avg_mae == null ? null : Number(s.avg_mae),
+        avg_confidence: s.avg_confidence == null ? null : Number(s.avg_confidence),
+        best_hour:      s.best_hour == null ? null : Number(s.best_hour),
+      })) : [];
+      setSignals(sigData);
+      setStats(statRows);
       setLastUpdate(new Date());
     } catch (e) {
       console.warn('Analytics load error:', e);
+      setRtStatus('error');
     } finally {
       setLoading(false);
+      setLoadState('idle');
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
   // Auto-refresh every 5 minutes
   useEffect(() => { const t = setInterval(load, 300_000); return () => clearInterval(t); }, [load]);
+  useEffect(() => {
+    if (!sbClient) return;
+    const ch = sbClient.channel('analytics-standalone-v1')
+      .on('postgres_changes', { event:'*', schema:'public', table:'signal_analyses' }, () => load())
+      .on('postgres_changes', { event:'*', schema:'public', table:'strategy_stats' }, () => load())
+      .subscribe((status) => {
+        setRtStatus(status === 'SUBSCRIBED' ? 'live' : status === 'CHANNEL_ERROR' ? 'error' : 'connecting');
+      });
+    return () => { sbClient.removeChannel(ch); };
+  }, [load]);
 
   // ── Derived metrics ────────────────────────────────────────────────────
   const resolved  = signals.filter(s => s.outcome !== 'OPEN');
@@ -355,7 +477,7 @@ function Analytics() {
   const lossClusters = streakHistory.filter(s => s.type === 'L' && s.len >= 2);
 
   // R-multiple adherence (actual pnl_r vs expected: TP1=~0.8, TP2=~2.0, SL=-1.0)
-  const expected = { TP1_HIT: 0.8, TP2_HIT: 2.0, SL_HIT: -1.0 };
+  const expected = { TP1_HIT: 1.0, TP2_HIT: 2.0, SL_HIT: -1.0 };
   const rAdh = resolved.filter(s => s.pnl_r != null && expected[s.outcome] != null).map(s => ({
     outcome: s.outcome,
     actual:  s.pnl_r,
@@ -415,29 +537,24 @@ function Analytics() {
   const outcomeCounts = { TP2_HIT: 0, TP1_HIT: 0, SL_HIT: 0, EXPIRED: 0, OPEN: 0 };
   for (const s of signals) { if (s.outcome in outcomeCounts) outcomeCounts[s.outcome]++; }
 
-  const hasData = resolved.length > 0;
+  const hasData = signals.length > 0;
 
   return (
     <div style={{ minHeight: '100vh', background: C.bg, color: C.text }}>
 
       {/* ── NAV ── */}
-      <div style={{ borderBottom: `1px solid ${C.border}`, background: 'rgba(6,7,16,0.96)', padding: '0 32px', position: 'sticky', top: 0, zIndex: 100 }}>
+      <div style={{ borderBottom: `1px solid ${C.border}`, background: 'rgba(11,15,25,0.86)', padding: '0 32px', position: 'sticky', top: 0, zIndex: 100, backdropFilter:'blur(18px)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 58 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg,${C.amber},#B85500)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 900 }}>✈</div>
-            <span style={{ fontWeight: 900, fontSize: 16, letterSpacing: '-0.03em' }}>PropPilot <span style={{ color: C.amber }}>AI</span></span>
+            <div style={{ width: 30, height: 30, borderRadius: 8, background: `linear-gradient(135deg,${C.indigo},#14B8A6)`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 900 }}>P</div>
+            <span style={{ fontWeight: 900, fontSize: 16, letterSpacing: '-0.03em' }}>PropPilot <span style={{ color: C.indigo }}>AI</span></span>
             <span style={{ color: C.muted, fontSize: 12, marginLeft: 4 }}>/ Analytics</span>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {lastUpdate && (
-              <span style={{ fontSize: 11, color: C.muted }}>
-                Updated {Math.round((Date.now() - lastUpdate) / 60000)}m ago
-              </span>
-            )}
+            <SyncPill rtStatus={rtStatus} loadState={loadState} lastUpdate={lastUpdate}/>
             <button onClick={load} style={{ padding: '5px 12px', border: `1px solid ${C.border}`, borderRadius: 7, background: 'transparent', color: C.sub, fontSize: 12, cursor: 'pointer' }}>
               ↻ Refresh
             </button>
-            <a href="roadmap.html" style={{ color: C.teal, fontSize: 13, fontWeight: 700, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.teal}30`, borderRadius: 7 }}>🗺 Roadmap</a>
             <a href="signal.html" style={{ color: C.amber, fontSize: 13, fontWeight: 700, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.amber}30`, borderRadius: 7 }}>⚡ Signal Engine</a>
             <a href="index.html"  style={{ color: C.muted, fontSize: 13, textDecoration: 'none', padding: '5px 12px', border: `1px solid ${C.border}`, borderRadius: 7 }}>← PropPilot OS</a>
           </div>
@@ -497,6 +614,17 @@ function Analytics() {
               ))}
             </div>
 
+            <div style={{ ...card, marginBottom: 20 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:16 }}>
+                <div>
+                  <div style={{ fontWeight:800, fontSize:15 }}>Signal → Outcome Loop</div>
+                  <div style={{ color: C.muted, fontSize: 12, marginTop: 4 }}>OPEN → TP1_HIT / TP2_HIT / SL_HIT / EXPIRED with realtime updates</div>
+                </div>
+                <div style={{ color: C.sub, fontSize: 11 }}>Phase 1 data stream</div>
+              </div>
+              <SignalOutcomeFlow signals={signals}/>
+            </div>
+
             {/* ── TABS ── */}
             <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
               {[['overview','📊 Overview'],['pillars','📐 Analytical Pillars'],['setups','🔬 Setups Table'],['heatmap','🕐 Hourly Heatmap']].map(([id, label]) => (
@@ -514,7 +642,7 @@ function Analytics() {
                 <div style={{ ...card, marginBottom: 20 }}>
                   <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>📈 R Equity Curve</div>
                   <div style={{ color: C.muted, fontSize: 12, marginBottom: 16 }}>
-                    Cumulative R profit over time. Each resolved signal adds/subtracts R. SL = −1R, TP1 ≈ +0.8R, TP2 ≈ +2R
+                    Cumulative R profit over resolved outcomes. SL = -1R, TP1 = +1R, TP2 = +2R unless the tracker calculates exact R.
                   </div>
                   <EquityCurve signals={signals}/>
                 </div>
@@ -533,6 +661,14 @@ function Analytics() {
                     <div style={{ fontWeight: 700, fontSize: 13, color: C.sub, marginBottom: 14 }}>Win Rate by Session</div>
                     {sessData.length ? <BarChart data={sessData}/> : <div style={{ color: C.muted, fontSize: 12 }}>No data</div>}
                   </div>
+                </div>
+
+                <div style={{ ...card, marginBottom: 20 }}>
+                  <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>🗓 Day Heatmap</div>
+                  <div style={{ color: C.muted, fontSize: 12, marginBottom: 16 }}>
+                    Daily realized R across the last 28 calendar days. Green means positive sessions, red marks drawdown clusters.
+                  </div>
+                  <DayHeatmap signals={signals}/>
                 </div>
 
                 {/* Recent signals */}
@@ -785,7 +921,7 @@ function Analytics() {
                 {/* Phase 1 Gate Progress */}
                 <div style={{ ...card, marginBottom: 20 }}>
                   <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>🚪 Phase 1 → Phase 2 Gate Progress</div>
-                  <div style={{ color: C.muted, fontSize: 12, marginBottom: 18 }}>All three criteria must pass before enabling live execution. <a href="roadmap.html" style={{ color: C.amber, textDecoration: 'none' }}>View full roadmap →</a></div>
+                  <div style={{ color: C.muted, fontSize: 12, marginBottom: 18 }}>All three criteria must pass before increasing automation scope.</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14 }}>
                     {[
                       { label: 'Trades', current: decided, target: 100, unit: '', pass: decided >= 100, color: C.teal },

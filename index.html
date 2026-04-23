@@ -11,24 +11,77 @@
   <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
   <!-- Babel for JSX -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.2/dist/umd/supabase.min.js"></script>
   <!-- TradingView Lightweight Charts — free open-source charting library -->
   <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
+    :root {
+      --pp-bg: #0B0F19;
+      --pp-bg-soft: #101624;
+      --pp-panel: rgba(21, 26, 37, 0.82);
+      --pp-panel-solid: #151A25;
+      --pp-panel-2: #1B2230;
+      --pp-blue: #3B82F6;
+      --pp-green: #10B981;
+      --pp-red: #EF4444;
+      --pp-amber: #F59E0B;
+      --pp-text: #F8FAFC;
+      --pp-sub: #94A3B8;
+      --pp-muted: #64748B;
+      --pp-border: rgba(148, 163, 184, 0.14);
+      --pp-border-strong: rgba(148, 163, 184, 0.24);
+      --pp-radius: 8px;
+      --pp-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
-    body { background: #070810; color: #F1F5F9; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    body { background: var(--pp-bg); color: var(--pp-text); font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
     ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
     button { font-family: inherit; }
     #root { min-height: 100vh; }
+    @keyframes pp-spin { to { transform: rotate(360deg); } }
+    @keyframes pp-shimmer { 100% { transform: translateX(100%); } }
+    @keyframes pp-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .pp-app-shell { min-height: 100vh; padding-bottom: 86px; background:
+      radial-gradient(circle at 20% -10%, rgba(59,130,246,.16), transparent 32%),
+      linear-gradient(180deg, #0B0F19 0%, #080B12 100%); }
+    .pp-topbar { position: sticky; top: 0; z-index: 80; border-bottom: 1px solid var(--pp-border); background: rgba(11,15,25,.82); backdrop-filter: blur(18px); }
+    .pp-topbar-inner { height: 64px; max-width: 1440px; margin: 0 auto; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .pp-brand-mark { width: 34px; height: 34px; border-radius: 8px; background: linear-gradient(135deg, var(--pp-blue), #14B8A6); display: grid; place-items: center; color: #fff; font-weight: 900; box-shadow: 0 12px 30px rgba(59,130,246,.24); }
+    .pp-status-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--pp-border); background: rgba(21,26,37,.72); color: var(--pp-sub); font-size: 11px; font-weight: 800; white-space: nowrap; }
+    .pp-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pp-muted); box-shadow: 0 0 0 3px rgba(100,116,139,.12); }
+    .pp-status-pill.synced .pp-status-dot { background: var(--pp-green); box-shadow: 0 0 0 3px rgba(16,185,129,.14); }
+    .pp-status-pill.updating .pp-status-dot { background: var(--pp-amber); box-shadow: 0 0 0 3px rgba(245,158,11,.14); }
+    .pp-status-pill.offline .pp-status-dot { background: var(--pp-red); box-shadow: 0 0 0 3px rgba(239,68,68,.14); }
+    .pp-content { max-width: 1440px; margin: 0 auto; padding: 24px; animation: pp-rise .28s ease both; }
+    .pp-bottom-nav { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 100; width: min(680px, calc(100vw - 24px)); min-height: 62px; padding: 7px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; border: 1px solid var(--pp-border-strong); border-radius: 18px; background: rgba(11,15,25,.86); backdrop-filter: blur(20px); box-shadow: var(--pp-shadow); }
+    .pp-nav-item { min-height: 48px; border: 0; border-radius: 12px; color: var(--pp-muted); background: transparent; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; transition: background .18s ease, color .18s ease, transform .18s ease; }
+    .pp-nav-item:hover { background: rgba(255,255,255,.04); color: var(--pp-text); transform: translateY(-1px); }
+    .pp-nav-item.active { background: rgba(59,130,246,.14); color: #DBEAFE; box-shadow: inset 0 0 0 1px rgba(59,130,246,.25); }
+    .pp-nav-icon { font-size: 16px; line-height: 1; }
+    .pp-nav-label { font-size: 10px; font-weight: 800; letter-spacing: .01em; }
+    .pp-panel { background: var(--pp-panel); border: 1px solid var(--pp-border); border-radius: var(--pp-radius); box-shadow: 0 18px 44px rgba(0,0,0,.18); backdrop-filter: blur(18px); }
+    .pp-panel-solid { background: var(--pp-panel-solid); border: 1px solid var(--pp-border); border-radius: var(--pp-radius); }
+    .pp-grid { display: grid; gap: 16px; }
+    .pp-grid-4x { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .pp-grid-3x { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .pp-grid-2x { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pp-btn { border: 1px solid var(--pp-border); border-radius: 8px; background: rgba(255,255,255,.04); color: var(--pp-text); min-height: 36px; padding: 8px 12px; font-weight: 800; font-size: 12px; cursor: pointer; transition: transform .16s ease, background .16s ease, border-color .16s ease; }
+    .pp-btn:hover { transform: translateY(-1px); background: rgba(255,255,255,.07); border-color: var(--pp-border-strong); }
+    .pp-btn-primary { background: linear-gradient(135deg, var(--pp-blue), #2563EB); border-color: rgba(59,130,246,.5); color: #fff; }
+    .pp-skeleton { position: relative; overflow: hidden; background: rgba(255,255,255,.05); border-radius: 8px; }
+    .pp-skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent); animation: pp-shimmer 1.4s infinite; }
+    .pp-signal-frame { width: 100%; min-height: calc(100vh - 172px); border: 0; display: block; background: var(--pp-bg); }
 
     /* ── Mobile responsive ── */
     @media (max-width: 768px) {
-      .pp-topbar   { padding: 0 16px !important; }
-      .pp-topbar-inner { height: auto !important; flex-wrap: wrap; gap: 10px; padding: 12px 0; }
+      .pp-topbar-inner { height: auto; min-height: 58px; padding: 10px 16px; flex-wrap: wrap; }
       .pp-topbar-right { flex-wrap: wrap; gap: 8px; }
       .pp-tabs     { gap: 0 !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }
       .pp-tabs button { padding: 10px 14px !important; font-size: 13px !important; white-space: nowrap; }
       .pp-content  { padding: 16px !important; }
+      .pp-grid-4x, .pp-grid-3x, .pp-grid-2x { grid-template-columns: 1fr !important; }
+      .pp-bottom-nav { bottom: 10px; border-radius: 16px; }
       .pp-grid-4   { grid-template-columns: 1fr 1fr !important; }
       .pp-grid-3   { grid-template-columns: 1fr 1fr !important; }
       .pp-grid-2   { grid-template-columns: 1fr !important; }
@@ -55,7 +108,7 @@
 <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
 // ── localStorage helpers ──────────────────────────────────────────────────
 const LS = {
@@ -119,6 +172,11 @@ const API    = 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1';
 const SB_URL = 'https://nxiednydxyrtxpkmgtof.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
 const SB_HDR = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` };
+const SB_JSON_HDR = { ...SB_HDR, 'Content-Type': 'application/json' };
+const sbClient = (() => {
+  try { return window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null; }
+  catch (e) { console.warn('Supabase client unavailable', e); return null; }
+})();
 const TD_KEY = '552e649e1b1f4bba97d590c37e981118';
 const VERDICT_LABEL = { 'LONG_NOW':'LONG','SHORT_NOW':'SHORT','WAIT_LONG':'WAIT','WAIT_SHORT':'WAIT','NO_TRADE':'NO TRADE' };
 
@@ -296,13 +354,13 @@ const DEFAULT_TRADES = [
 // ═══════════════════════════════════════════════════════════════════════════
 
 const T = {
-  amber:'#F5A623', indigo:'#818CF8', green:'#34D399',
-  red:'#F87171',   yellow:'#FBBF24',
-  bg:'#070810', text:'#F1F5F9', sub:'#94A3B8', muted:'#475569',
-  border:'rgba(255,255,255,0.07)', surf:'rgba(255,255,255,0.04)',
+  amber:'#F59E0B', indigo:'#3B82F6', green:'#10B981',
+  red:'#EF4444',   yellow:'#F59E0B',
+  bg:'#0B0F19', text:'#F8FAFC', sub:'#94A3B8', muted:'#64748B',
+  border:'rgba(148,163,184,0.14)', surf:'rgba(21,26,37,0.82)',
 };
-const card  = { background:T.surf, border:`1px solid ${T.border}`, borderRadius:16, padding:24 };
-const cardS = { background:T.surf, border:`1px solid ${T.border}`, borderRadius:12, padding:16 };
+const card  = { background:T.surf, border:`1px solid ${T.border}`, borderRadius:8, padding:24, backdropFilter:'blur(18px)' };
+const cardS = { background:T.surf, border:`1px solid ${T.border}`, borderRadius:8, padding:16, backdropFilter:'blur(18px)' };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ATOMS
@@ -337,6 +395,196 @@ function RiskBar({ label, value, max, sublabel }) {
       </div>
     </div>
   );
+}
+
+function safeNum(v, fallback = null) {
+  return v == null || v === '' || Number.isNaN(Number(v)) ? fallback : Number(v);
+}
+
+function fmtUsd(v, digits = 0) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  return `$${Number(v).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+}
+
+function fmtR(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  return `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(2)}R`;
+}
+
+function fmtPct(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  return `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(1)}%`;
+}
+
+function timeAgo(iso) {
+  if (!iso) return '—';
+  const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function sessionLabel(s) {
+  if (!s) return 'Unknown';
+  const raw = String(s);
+  return raw
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+function normalizeSignalRow(s) {
+  return {
+    ...s,
+    signal_state: s.signal_state || s.verdict || 'NO_TRADE',
+    direction: s.direction || (['LONG_NOW', 'WAIT_LONG'].includes(s.signal_state) ? 'LONG' : ['SHORT_NOW', 'WAIT_SHORT'].includes(s.signal_state) ? 'SHORT' : null),
+    outcome: s.outcome || 'OPEN',
+    confidence: safeNum(s.confidence, 0),
+    price: safeNum(s.price),
+    tp1: safeNum(s.tp1),
+    tp2: safeNum(s.tp2),
+    sl: safeNum(s.sl),
+    pnl_r: safeNum(s.pnl_r),
+    mfe_r: safeNum(s.mfe_r),
+    mae_r: safeNum(s.mae_r),
+    session_name: s.session_name || 'Unknown',
+  };
+}
+
+function normalizeStatsRow(s) {
+  return {
+    ...s,
+    total_signals: safeNum(s.total_signals, 0),
+    open_signals: safeNum(s.open_signals, 0),
+    wins: safeNum(s.wins, 0),
+    losses: safeNum(s.losses, 0),
+    expired: safeNum(s.expired, 0),
+    win_rate: safeNum(s.win_rate, 0),
+    avg_pnl_r: safeNum(s.avg_pnl_r),
+    expectancy: safeNum(s.expectancy, 0),
+    avg_mfe: safeNum(s.avg_mfe),
+    avg_mae: safeNum(s.avg_mae),
+    avg_confidence: safeNum(s.avg_confidence),
+    best_hour: safeNum(s.best_hour),
+  };
+}
+
+function deriveSyncState(rtStatus, loadState) {
+  if (loadState === 'updating') return 'updating';
+  if (rtStatus === 'live') return 'synced';
+  if (rtStatus === 'error') return 'offline';
+  return 'updating';
+}
+
+function useUnifiedAppData() {
+  const [signals, setSignals] = useState([]);
+  const [stats, setStats] = useState([]);
+  const [account, setAccount] = useState(null);
+  const [settings, setSettings] = useState(null);
+  const [positions, setPositions] = useState([]);
+  const [snapshots, setSnapshots] = useState([]);
+  const [memory, setMemory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [rtStatus, setRtStatus] = useState('connecting');
+  const [loadState, setLoadState] = useState('idle');
+  const [lastLoadAt, setLastLoadAt] = useState(null);
+  const channelRef = useRef(null);
+  const refreshRef = useRef(null);
+
+  const refresh = useCallback(async (mode = 'updating') => {
+    setLoadState(mode);
+    try {
+      const reqs = await Promise.all([
+        fetch(`${SB_URL}/rest/v1/signal_analyses?select=*&order=created_at.desc&limit=250`, { headers: SB_HDR }),
+        fetch(`${SB_URL}/rest/v1/strategy_stats?select=*&order=expectancy.desc,total_signals.desc&limit=80`, { headers: SB_HDR }),
+        fetch(`${SB_URL}/rest/v1/paper_account?id=eq.1&select=*`, { headers: { ...SB_HDR, Accept: 'application/vnd.pgrst.object+json' } }),
+        fetch(`${SB_URL}/rest/v1/bot_settings?id=eq.1&select=*`, { headers: { ...SB_HDR, Accept: 'application/vnd.pgrst.object+json' } }),
+        fetch(`${SB_URL}/rest/v1/paper_positions?order=opened_at.desc&limit=60&select=*`, { headers: SB_HDR }),
+        fetch(`${SB_URL}/rest/v1/equity_snapshots?order=created_at.asc&limit=240&select=*`, { headers: SB_HDR }),
+        fetch(`${SB_URL}/rest/v1/bot_memory?order=run_at.desc&limit=6&select=*`, { headers: SB_HDR }),
+      ]);
+      const [
+        sigRes, statRes, accountRes, settingsRes, positionsRes, snapshotsRes, memoryRes,
+      ] = reqs;
+      const [
+        sigData, statData, accountData, settingsData, positionsData, snapshotsData, memoryData,
+      ] = await Promise.all([
+        sigRes.json(), statRes.json(), accountRes.json(), settingsRes.json(), positionsRes.json(), snapshotsRes.json(), memoryRes.json(),
+      ]);
+      setSignals(Array.isArray(sigData) ? sigData.map(normalizeSignalRow) : []);
+      setStats(Array.isArray(statData) ? statData.map(normalizeStatsRow) : []);
+      setAccount(accountData || null);
+      setSettings(settingsData || null);
+      setPositions(Array.isArray(positionsData) ? positionsData : []);
+      setSnapshots(Array.isArray(snapshotsData) ? snapshotsData : []);
+      setMemory(Array.isArray(memoryData) ? memoryData : []);
+      setLastLoadAt(new Date());
+      setRtStatus(status => (status === 'error' ? 'error' : status));
+    } catch (e) {
+      console.warn('Unified app load failed:', e);
+      setRtStatus('error');
+    } finally {
+      setLoading(false);
+      setLoadState('idle');
+    }
+  }, []);
+
+  const scheduleRefresh = useCallback((mode = 'updating', delay = 400) => {
+    clearTimeout(refreshRef.current);
+    refreshRef.current = setTimeout(() => refresh(mode), delay);
+  }, [refresh]);
+
+  useEffect(() => {
+    refresh('initial');
+    const poll = setInterval(() => refresh('updating'), 180000);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(refreshRef.current);
+    };
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!sbClient) return;
+    const ch = sbClient.channel('proppilot-shell-v1')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'paper_account', filter: 'id=eq.1' }, payload => {
+        if (payload.new) setAccount(prev => ({ ...(prev || {}), ...payload.new }));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bot_settings', filter: 'id=eq.1' }, payload => {
+        if (payload.new) setSettings(prev => ({ ...(prev || {}), ...payload.new }));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'paper_positions' }, () => scheduleRefresh())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'equity_snapshots' }, payload => {
+        if (payload.new) setSnapshots(prev => [...prev, payload.new].slice(-240));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'signal_analyses' }, () => scheduleRefresh())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'strategy_stats' }, () => scheduleRefresh('updating', 900))
+      .subscribe(status => {
+        setRtStatus(status === 'SUBSCRIBED' ? 'live' : status === 'CHANNEL_ERROR' ? 'error' : 'connecting');
+      });
+    channelRef.current = ch;
+    return () => {
+      if (channelRef.current) sbClient.removeChannel(channelRef.current);
+      channelRef.current = null;
+    };
+  }, [scheduleRefresh]);
+
+  return {
+    loading,
+    signals,
+    stats,
+    account,
+    settings,
+    positions,
+    snapshots,
+    memory,
+    rtStatus,
+    loadState,
+    syncState: deriveSyncState(rtStatus, loadState),
+    lastLoadAt,
+    refresh,
+  };
 }
 
 // ── Price formatter — NAS100 uses 0 decimals ──────────────────────────────
@@ -2420,40 +2668,669 @@ function RiskCalc({ account }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// UNIFIED PRODUCT UI
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SIGNAL_STATE_META = {
+  LONG_NOW:   { label:'Long Now',  color:T.green },
+  SHORT_NOW:  { label:'Short Now', color:T.red },
+  WAIT_LONG:  { label:'Wait Long', color:T.amber },
+  WAIT_SHORT: { label:'Wait Short', color:T.amber },
+  WAIT_BREAK: { label:'Wait Break',color:T.indigo },
+  AVOID_NEWS: { label:'Avoid News',color:T.red },
+  AVOID_CHOP: { label:'Avoid Chop',color:T.muted },
+  NO_TRADE:   { label:'No Trade',  color:T.muted },
+};
+
+const OUTCOME_META = {
+  OPEN:    { label:'OPEN', color:T.indigo },
+  TP1_HIT: { label:'TP1_HIT', color:T.green },
+  TP2_HIT: { label:'TP2_HIT', color:T.green },
+  SL_HIT:  { label:'SL_HIT', color:T.red },
+  EXPIRED: { label:'EXPIRED', color:T.amber },
+};
+
+function SyncPill({ syncState, rtStatus, lastLoadAt }) {
+  const stateLabel = syncState === 'synced' ? 'Synced' : syncState === 'offline' ? 'Demo / Offline' : 'Updating';
+  const detail = syncState === 'synced'
+    ? `Realtime ${rtStatus === 'live' ? 'live' : 'ready'}`
+    : syncState === 'offline'
+    ? 'Fallback mode'
+    : 'Pulling latest rows';
+  return (
+    <div className={`pp-status-pill ${syncState}`}>
+      <span className="pp-status-dot"/>
+      <span>{stateLabel}</span>
+      <span style={{ color: T.muted, fontWeight: 600 }}>{detail}</span>
+      {lastLoadAt && <span style={{ color: T.muted, fontWeight: 600 }}>{timeAgo(lastLoadAt.toISOString())}</span>}
+    </div>
+  );
+}
+
+function ShellKpi({ label, value, sub, color = T.text }) {
+  return (
+    <div className="pp-panel" style={{ padding: 16 }}>
+      <div style={{ color: T.muted, fontSize: 11, fontWeight: 800, letterSpacing: '.04em', marginBottom: 10 }}>{label}</div>
+      <div style={{ color, fontSize: 28, fontWeight: 900, lineHeight: 1 }}>{value}</div>
+      <div style={{ color: T.sub, fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>{sub}</div>
+    </div>
+  );
+}
+
+function MiniLineChart({ points, color = T.indigo, height = 220, label = 'No data yet' }) {
+  if (!points?.length) {
+    return <div style={{ height, display:'flex', alignItems:'center', justifyContent:'center', color:T.muted, fontSize:13 }}>{label}</div>;
+  }
+  const W = 900, H = height, PL = 12, PR = 18, PT = 12, PB = 28;
+  const vals = points.map(p => p.value);
+  const min = Math.min(...vals, 0);
+  const max = Math.max(...vals, 0);
+  const rng = max - min || 1;
+  const sx = i => PL + (i / Math.max(1, points.length - 1)) * (W - PL - PR);
+  const sy = v => H - PB - ((v - min) / rng) * (H - PT - PB);
+  const linePts = points.map((p, i) => [sx(i), sy(p.value)]);
+  const line = linePts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const area = `${line} L${linePts[linePts.length-1][0].toFixed(1)},${(H-PB).toFixed(1)} L${linePts[0][0].toFixed(1)},${(H-PB).toFixed(1)} Z`;
+  const last = points[points.length - 1];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H }}>
+      <defs>
+        <linearGradient id="ppCurveFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.34"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0"/>
+        </linearGradient>
+      </defs>
+      {[0, 0.5, 1].map(step => {
+        const y = PT + step * (H - PT - PB);
+        return <line key={step} x1={PL} x2={W-PR} y1={y} y2={y} stroke="rgba(148,163,184,0.12)" strokeWidth="1"/>;
+      })}
+      {min < 0 && max > 0 && (
+        <line x1={PL} x2={W-PR} y1={sy(0)} y2={sy(0)} stroke="rgba(148,163,184,0.18)" strokeWidth="1" strokeDasharray="5 5"/>
+      )}
+      <path d={area} fill="url(#ppCurveFill)"/>
+      <path d={line} fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx={linePts[linePts.length-1][0]} cy={linePts[linePts.length-1][1]} r="4.5" fill={color}/>
+      <text x={W - PR} y={18} fill={color} textAnchor="end" fontSize="12" fontWeight="800">{fmtR(last.value)}</text>
+      {points.filter((_, i) => i === 0 || i === points.length - 1 || i === Math.floor(points.length / 2)).map((p, i) => (
+        <text key={i} x={sx(points.indexOf(p))} y={H-8} fill={T.muted} textAnchor="middle" fontSize="10">{p.label}</text>
+      ))}
+    </svg>
+  );
+}
+
+function SignalOutcomeFlow({ signals }) {
+  const outcomeCounts = signals.reduce((acc, s) => {
+    acc[s.outcome] = (acc[s.outcome] || 0) + 1;
+    return acc;
+  }, { OPEN: 0, TP1_HIT: 0, TP2_HIT: 0, SL_HIT: 0, EXPIRED: 0 });
+  const stages = [
+    { id:'signal', label:'Signal', sub:`${signals.length} analyzed`, color:T.indigo },
+    { id:'open', label:'OPEN', sub:`${outcomeCounts.OPEN || 0}`, color:T.indigo },
+    { id:'tp1', label:'TP1_HIT', sub:`${outcomeCounts.TP1_HIT || 0}`, color:T.green },
+    { id:'tp2', label:'TP2_HIT', sub:`${outcomeCounts.TP2_HIT || 0}`, color:T.green },
+    { id:'sl', label:'SL_HIT', sub:`${outcomeCounts.SL_HIT || 0}`, color:T.red },
+    { id:'exp', label:'EXPIRED', sub:`${outcomeCounts.EXPIRED || 0}`, color:T.amber },
+  ];
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'repeat(6, minmax(0, 1fr))', gap: 10 }}>
+      {stages.map((stage, i) => (
+        <div key={stage.id} className="pp-panel" style={{ padding: 14, position:'relative', overflow:'hidden' }}>
+          <div style={{ color:stage.color, fontSize:11, fontWeight:800, letterSpacing:'.05em' }}>{stage.label}</div>
+          <div style={{ color:T.text, fontSize:24, fontWeight:900, marginTop:8 }}>{stage.sub}</div>
+          {i < stages.length - 1 && (
+            <div style={{ position:'absolute', right:-9, top:'50%', transform:'translateY(-50%)', color:'rgba(148,163,184,0.32)', fontSize:22 }}>→</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DayHeatmap({ signals }) {
+  const daily = {};
+  signals.filter(s => s.outcome !== 'OPEN').forEach(s => {
+    const day = new Date(s.outcome_at || s.created_at).toISOString().slice(0, 10);
+    if (!daily[day]) daily[day] = { r: 0, n: 0, w: 0, l: 0 };
+    daily[day].r += safeNum(s.pnl_r, 0) || 0;
+    daily[day].n += 1;
+    if (s.outcome === 'TP1_HIT' || s.outcome === 'TP2_HIT') daily[day].w += 1;
+    if (s.outcome === 'SL_HIT') daily[day].l += 1;
+  });
+  const days = Array.from({ length: 28 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (27 - i));
+    const key = d.toISOString().slice(0, 10);
+    return { key, label: d.toLocaleDateString('en-GB', { month:'short', day:'numeric' }), ...daily[key] };
+  });
+  const maxAbs = Math.max(1, ...days.map(d => Math.abs(d.r || 0)));
+  return (
+    <div style={{ display:'grid', gridTemplateColumns:'repeat(7, minmax(0, 1fr))', gap:8 }}>
+      {days.map(day => {
+        const r = safeNum(day.r, 0) || 0;
+        const opacity = 0.14 + (Math.abs(r) / maxAbs) * 0.56;
+        const bg = r > 0 ? `rgba(16,185,129,${opacity})` : r < 0 ? `rgba(239,68,68,${opacity})` : 'rgba(255,255,255,0.04)';
+        return (
+          <div key={day.key} className="pp-panel" style={{ padding:10, background:bg, minHeight:68 }}>
+            <div style={{ color:T.muted, fontSize:10, marginBottom:10 }}>{day.label}</div>
+            <div style={{ color:r > 0 ? T.green : r < 0 ? T.red : T.sub, fontWeight:900, fontSize:14 }}>{fmtR(r)}</div>
+            <div style={{ color:T.sub, fontSize:10, marginTop:6 }}>{day.n || 0} trades</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ExecutiveDashboard({ data, phase }) {
+  const account = data.account || {};
+  const positions = data.positions || [];
+  const openPositions = positions.filter(p => p.status === 'OPEN' || p.status === 'TP1_HIT');
+  const activeSignals = (data.signals || []).filter(s => ['LONG_NOW', 'SHORT_NOW'].includes(s.signal_state) && s.outcome === 'OPEN').slice(0, 6);
+  const dailyMode = (() => {
+    const bal = safeNum(account.balance, 100000) || 100000;
+    const daily = Math.abs(Math.min(0, safeNum(account.daily_pnl_usd, 0) || 0));
+    const limit = bal * ((safeNum(data.settings?.daily_loss_limit_pct, 2) || 2) / 100);
+    const used = limit > 0 ? (daily / limit) * 100 : 0;
+    return used < 40 ? { label:'NORMAL', color:T.green } : used < 75 ? { label:'DEFENSIVE', color:T.amber } : { label:'STOP', color:T.red };
+  })();
+  const equityPoints = (data.snapshots || []).slice(-60).map(s => ({
+    label: new Date(s.created_at).toLocaleDateString('en-GB', { month:'short', day:'numeric' }),
+    value: safeNum(s.equity, safeNum(s.balance, 0)) || 0,
+  }));
+  const sessionGroups = {};
+  (data.signals || []).filter(s => s.outcome !== 'OPEN').forEach(s => {
+    const key = sessionLabel(s.session_name);
+    if (!sessionGroups[key]) sessionGroups[key] = { w:0, l:0 };
+    if (['TP1_HIT', 'TP2_HIT'].includes(s.outcome)) sessionGroups[key].w += 1;
+    if (s.outcome === 'SL_HIT') sessionGroups[key].l += 1;
+  });
+  const sessionRows = Object.entries(sessionGroups).map(([k, v]) => {
+    const total = v.w + v.l;
+    return { name:k, total, wr: total ? (v.w / total) * 100 : 0 };
+  }).sort((a, b) => b.wr - a.wr).slice(0, 4);
+  return (
+    <div className="pp-grid" style={{ gap:20 }}>
+      <div className="pp-panel" style={{ padding: 20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16, flexWrap:'wrap' }}>
+          <div>
+            <div style={{ color:T.indigo, fontSize:11, fontWeight:800, letterSpacing:'.06em', marginBottom:10 }}>PRE-SESSION BRIEF</div>
+            <div style={{ fontSize:30, fontWeight:900, letterSpacing:'-.03em', marginBottom:10 }}>Unified operator view for Phase {phase.toUpperCase()}</div>
+            <div style={{ color:T.sub, fontSize:14, lineHeight:1.7, maxWidth:760 }}>
+              {data.memory?.[0]?.market_notes || 'No fresh memory note yet. Live paper account, open positions, signal outcomes and challenge buffer are connected below.'}
+            </div>
+          </div>
+          <div className="pp-panel-solid" style={{ padding:14, minWidth:220 }}>
+            <div style={{ color:T.muted, fontSize:10, fontWeight:800, letterSpacing:'.05em' }}>DAILY MODE</div>
+            <div style={{ color:dailyMode.color, fontWeight:900, fontSize:26, marginTop:6 }}>{dailyMode.label}</div>
+            <div style={{ color:T.sub, fontSize:12, marginTop:8 }}>{account.kill_switch_active ? 'Kill-switch active' : `${openPositions.length} open positions · ${activeSignals.length} actionable signals`}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="pp-grid pp-grid-4x">
+        <ShellKpi label="Equity" value={fmtUsd(account.equity || account.balance || 100000)} sub={`Balance ${fmtUsd(account.balance || 100000)} · Open P&L ${fmtUsd(account.open_pnl || 0)}`} color={(safeNum(account.equity, 0) || 0) >= (safeNum(account.balance, 0) || 0) ? T.green : T.red}/>
+        <ShellKpi label="Active Signals" value={activeSignals.length} sub={`${(data.signals || []).filter(s => s.outcome === 'OPEN').length} open analyses`} color={activeSignals.length ? T.indigo : T.sub}/>
+        <ShellKpi label="Win Rate" value={`${safeNum(account.win_rate_pct, 0)?.toFixed?.(0) || '0'}%`} sub={`${safeNum(account.win_trades, 0) || 0}W / ${safeNum(account.loss_trades, 0) || 0}L`} color={(safeNum(account.win_rate_pct, 0) || 0) >= 50 ? T.green : T.red}/>
+        <ShellKpi label="Risk Buffer" value={fmtUsd((safeNum(account.balance, 100000) || 100000) * ((safeNum(data.settings?.daily_loss_limit_pct, 2) || 2) / 100) - Math.abs(Math.min(0, safeNum(account.daily_pnl_usd, 0) || 0)))} sub={`Daily P&L ${fmtUsd(account.daily_pnl_usd || 0)} · limit ${data.settings?.daily_loss_limit_pct || 2}%`} color={dailyMode.color}/>
+      </div>
+
+      <div className="pp-grid pp-grid-2x">
+        <div className="pp-panel" style={{ padding: 20 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 14 }}>
+            <div>
+              <div style={{ fontWeight:800, fontSize:16 }}>Live Equity Curve</div>
+              <div style={{ color:T.sub, fontSize:12, marginTop:4 }}>Realtime snapshots from `equity_snapshots`</div>
+            </div>
+            <SyncPill syncState={data.syncState} rtStatus={data.rtStatus} lastLoadAt={data.lastLoadAt}/>
+          </div>
+          <MiniLineChart points={equityPoints} color={(equityPoints[equityPoints.length - 1]?.value || 0) >= (equityPoints[0]?.value || 0) ? T.green : T.red} label="Equity snapshots appear after the first paper updates"/>
+        </div>
+
+        <div className="pp-panel" style={{ padding: 20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom: 14 }}>Session Edge Snapshot</div>
+          <div className="pp-grid" style={{ gap:10 }}>
+            {sessionRows.length ? sessionRows.map(row => (
+              <div key={row.name}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                  <span style={{ color:T.sub, fontSize:12 }}>{row.name}</span>
+                  <span style={{ color: row.wr >= 50 ? T.green : T.red, fontSize:12, fontWeight:800 }}>{row.wr.toFixed(0)}%</span>
+                </div>
+                <div style={{ height:6, background:'rgba(255,255,255,0.06)', borderRadius:999, overflow:'hidden' }}>
+                  <div style={{ width:`${row.wr}%`, height:'100%', background: row.wr >= 50 ? T.green : T.red, borderRadius:999 }}/>
+                </div>
+              </div>
+            )) : <div style={{ color:T.muted, fontSize:13 }}>Waiting for resolved signal outcomes</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="pp-grid pp-grid-2x">
+        <div className="pp-panel" style={{ padding: 20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom: 14 }}>Active Signals</div>
+          <div className="pp-grid" style={{ gap:10 }}>
+            {activeSignals.length ? activeSignals.map(signal => {
+              const meta = SIGNAL_STATE_META[signal.signal_state] || SIGNAL_STATE_META.NO_TRADE;
+              return (
+                <div key={signal.id} className="pp-panel-solid" style={{ padding: 14 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', gap:12, alignItems:'center' }}>
+                    <div>
+                      <div style={{ color:T.text, fontSize:14, fontWeight:800 }}>{signal.symbol}</div>
+                      <div style={{ color:T.sub, fontSize:12, marginTop:4 }}>{sessionLabel(signal.session_name)} · {signal.timeframe}</div>
+                    </div>
+                    <div style={{ color:meta.color, fontSize:12, fontWeight:900 }}>{meta.label}</div>
+                  </div>
+                  <div style={{ display:'flex', gap:14, marginTop:10, flexWrap:'wrap', fontSize:12 }}>
+                    <span style={{ color:T.sub }}>Conf <strong style={{ color:T.text }}>{safeNum(signal.confidence, 0)}%</strong></span>
+                    <span style={{ color:T.sub }}>Entry <strong style={{ color:T.text }}>{signal.price ? fmtPrice(signal.symbol, signal.price) : '—'}</strong></span>
+                    <span style={{ color:T.sub }}>TP2 <strong style={{ color:T.green }}>{signal.tp2 ? fmtPrice(signal.symbol, signal.tp2) : '—'}</strong></span>
+                  </div>
+                </div>
+              );
+            }) : <div style={{ color:T.muted, fontSize:13 }}>No actionable live signals right now.</div>}
+          </div>
+        </div>
+
+        <div className="pp-panel" style={{ padding: 20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom: 14 }}>Paper Positions</div>
+          <div className="pp-grid" style={{ gap:10 }}>
+            {openPositions.length ? openPositions.slice(0, 5).map(pos => (
+              <div key={pos.id} className="pp-panel-solid" style={{ padding: 14 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12 }}>
+                  <div>
+                    <div style={{ color:T.text, fontWeight:800 }}>{pos.symbol}</div>
+                    <div style={{ color:T.sub, fontSize:12, marginTop:4 }}>{pos.direction} · {pos.status}</div>
+                  </div>
+                  <div style={{ color:safeNum(pos.pnl_usd, 0) >= 0 ? T.green : T.red, fontWeight:900 }}>{fmtUsd(pos.pnl_usd || pos.partial_pnl_usd || 0)}</div>
+                </div>
+                <div style={{ display:'flex', gap:14, marginTop:10, fontSize:12, flexWrap:'wrap' }}>
+                  <span style={{ color:T.sub }}>Entry <strong style={{ color:T.text }}>{safeNum(pos.entry_price) != null ? Number(pos.entry_price).toFixed(2) : '—'}</strong></span>
+                  <span style={{ color:T.sub }}>Risk <strong style={{ color:T.text }}>{fmtUsd(pos.risk_usd || 0)}</strong></span>
+                  <span style={{ color:T.sub }}>R <strong style={{ color:safeNum(pos.pnl_r, 0) >= 0 ? T.green : T.red }}>{fmtR(pos.pnl_r || pos.partial_pnl_r || 0)}</strong></span>
+                </div>
+              </div>
+            )) : <div style={{ color:T.muted, fontSize:13 }}>No open paper positions.</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OutcomeAnalyticsPanel({ data }) {
+  const signals = data.signals || [];
+  const resolved = signals.filter(s => s.outcome !== 'OPEN');
+  const wins = resolved.filter(s => ['TP1_HIT', 'TP2_HIT'].includes(s.outcome));
+  const losses = resolved.filter(s => s.outcome === 'SL_HIT');
+  const decided = wins.length + losses.length;
+  const wr = decided ? (wins.length / decided) * 100 : 0;
+  const totalR = resolved.reduce((sum, s) => sum + (safeNum(s.pnl_r, 0) || 0), 0);
+  const grossProfit = wins.reduce((sum, s) => sum + Math.abs(safeNum(s.pnl_r, 0) || 0), 0);
+  const grossLoss = losses.reduce((sum, s) => sum + Math.abs(safeNum(s.pnl_r, 0) || 0), 0);
+  const avgWin = wins.length ? grossProfit / wins.length : 0;
+  const avgLoss = losses.length ? grossLoss / losses.length : 0;
+  const expectancy = decided ? ((wins.length / decided) * avgWin) - ((losses.length / decided) * avgLoss) : 0;
+  const rCurve = resolved
+    .filter(s => safeNum(s.pnl_r) != null)
+    .sort((a, b) => new Date(a.outcome_at || a.created_at) - new Date(b.outcome_at || b.created_at))
+    .reduce((acc, s, idx) => {
+      const prev = acc[idx - 1]?.value || 0;
+      acc.push({
+        label: new Date(s.outcome_at || s.created_at).toLocaleDateString('en-GB', { month:'short', day:'numeric' }),
+        value: prev + (safeNum(s.pnl_r, 0) || 0),
+      });
+      return acc;
+    }, []);
+  const sessionRows = {};
+  const instrumentRows = {};
+  resolved.forEach(s => {
+    const sess = sessionLabel(s.session_name);
+    const inst = s.symbol || 'Unknown';
+    if (!sessionRows[sess]) sessionRows[sess] = { w:0, l:0 };
+    if (!instrumentRows[inst]) instrumentRows[inst] = { w:0, l:0 };
+    if (['TP1_HIT', 'TP2_HIT'].includes(s.outcome)) {
+      sessionRows[sess].w += 1;
+      instrumentRows[inst].w += 1;
+    }
+    if (s.outcome === 'SL_HIT') {
+      sessionRows[sess].l += 1;
+      instrumentRows[inst].l += 1;
+    }
+  });
+  const toRows = (rows) => Object.entries(rows).map(([name, v]) => {
+    const total = v.w + v.l;
+    return { name, total, wr: total ? (v.w / total) * 100 : 0 };
+  }).sort((a, b) => b.wr - a.wr);
+  return (
+    <div className="pp-grid" style={{ gap:20 }}>
+      <div className="pp-grid pp-grid-4x">
+        <ShellKpi label="Expectancy" value={fmtR(expectancy)} sub={`Profit factor ${grossLoss ? (grossProfit / grossLoss).toFixed(2) : grossProfit ? '∞' : '0'}x`} color={expectancy >= 0 ? T.green : T.red}/>
+        <ShellKpi label="Session Win Rate" value={`${wr.toFixed(1)}%`} sub={`${decided} decided outcomes`} color={wr >= 50 ? T.green : T.red}/>
+        <ShellKpi label="Resolved R" value={fmtR(totalR)} sub={`${resolved.length} resolved · ${signals.filter(s => s.outcome === 'OPEN').length} open`} color={totalR >= 0 ? T.green : T.red}/>
+        <ShellKpi label="Avg Win / Loss" value={`${avgWin.toFixed(2)}R / ${avgLoss.toFixed(2)}R`} sub="Outcome tracker / real data" color={T.indigo}/>
+      </div>
+
+      <div className="pp-panel" style={{ padding:20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:16 }}>
+          <div>
+            <div style={{ fontWeight:800, fontSize:16 }}>Signal → Outcome Flow</div>
+            <div style={{ color:T.sub, fontSize:12, marginTop:4 }}>OPEN → TP1_HIT / TP2_HIT / SL_HIT / EXPIRED</div>
+          </div>
+          <SyncPill syncState={data.syncState} rtStatus={data.rtStatus} lastLoadAt={data.lastLoadAt}/>
+        </div>
+        <SignalOutcomeFlow signals={signals}/>
+      </div>
+
+      <div className="pp-grid pp-grid-2x">
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>Live R Equity Curve</div>
+          <MiniLineChart points={rCurve} color={totalR >= 0 ? T.green : T.red} label="Resolved outcomes will build the curve here"/>
+        </div>
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>Heatmap by Day</div>
+          <DayHeatmap signals={signals}/>
+        </div>
+      </div>
+
+      <div className="pp-grid pp-grid-2x">
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>Win Rate by Session</div>
+          <div className="pp-grid" style={{ gap:10 }}>
+            {toRows(sessionRows).slice(0, 6).map(row => (
+              <div key={row.name}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                  <span style={{ color:T.sub, fontSize:12 }}>{row.name}</span>
+                  <span style={{ color: row.wr >= 50 ? T.green : T.red, fontWeight:800, fontSize:12 }}>{row.wr.toFixed(0)}%</span>
+                </div>
+                <div style={{ height:8, background:'rgba(255,255,255,.06)', borderRadius:999, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${row.wr}%`, background: row.wr >= 50 ? T.green : T.red, borderRadius:999 }}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>Win Rate by Instrument</div>
+          <div className="pp-grid" style={{ gap:10 }}>
+            {toRows(instrumentRows).slice(0, 6).map(row => (
+              <div key={row.name}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                  <span style={{ color:T.sub, fontSize:12 }}>{row.name}</span>
+                  <span style={{ color: row.wr >= 50 ? T.green : T.red, fontWeight:800, fontSize:12 }}>{row.wr.toFixed(0)}%</span>
+                </div>
+                <div style={{ height:8, background:'rgba(255,255,255,.06)', borderRadius:999, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${row.wr}%`, background: row.wr >= 50 ? T.green : T.red, borderRadius:999 }}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="pp-panel" style={{ padding:20 }}>
+        <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>Recent Outcomes</div>
+        <div style={{ overflowX:'auto' }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+            <thead>
+              <tr style={{ borderBottom:`1px solid ${T.border}` }}>
+                {['Symbol','State','Session','Outcome','P&L R','Confidence','Updated'].map(h => (
+                  <th key={h} style={{ padding:'8px 10px', textAlign:'left', color:T.muted, fontWeight:700 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {signals.slice(0, 16).map(s => {
+                const stateMeta = SIGNAL_STATE_META[s.signal_state] || SIGNAL_STATE_META.NO_TRADE;
+                const outcomeMeta = OUTCOME_META[s.outcome] || OUTCOME_META.OPEN;
+                return (
+                  <tr key={s.id} style={{ borderBottom:`1px solid rgba(148,163,184,.08)` }}>
+                    <td style={{ padding:'10px', color:T.text, fontWeight:800 }}>{s.symbol}</td>
+                    <td style={{ padding:'10px', color:stateMeta.color, fontWeight:700 }}>{stateMeta.label}</td>
+                    <td style={{ padding:'10px', color:T.sub }}>{sessionLabel(s.session_name)}</td>
+                    <td style={{ padding:'10px' }}><span style={{ color:outcomeMeta.color, fontWeight:800 }}>{outcomeMeta.label}</span></td>
+                    <td style={{ padding:'10px', color:(safeNum(s.pnl_r, 0) || 0) >= 0 ? T.green : T.red, fontWeight:800 }}>{fmtR(s.pnl_r)}</td>
+                    <td style={{ padding:'10px', color:T.sub }}>{safeNum(s.confidence, 0)}%</td>
+                    <td style={{ padding:'10px', color:T.muted }}>{timeAgo(s.outcome_at || s.updated_at || s.created_at)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SignalsWorkspace() {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="pp-panel" style={{ padding:0, overflow:'hidden' }}>
+      {!loaded && (
+        <div style={{ padding:20 }}>
+          <div className="pp-skeleton" style={{ height:18, width:220, marginBottom:16 }}/>
+          <div className="pp-skeleton" style={{ height:460, width:'100%' }}/>
+        </div>
+      )}
+      <iframe
+        title="Signals"
+        src="signal.html?embed=1"
+        className="pp-signal-frame"
+        onLoad={() => setLoaded(true)}
+        style={{ display: loaded ? 'block' : 'none' }}
+      />
+    </div>
+  );
+}
+
+function SettingsWorkbench({ data, accountView, onUpdateAccount }) {
+  const [localSettings, setLocalSettings] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [prefs, setPrefs] = useState(() => LS.get('ui_prefs', { theme:'dark', push:true, sound:false, summaries:true }));
+
+  useEffect(() => {
+    setLocalSettings(data.settings ? { ...data.settings } : null);
+  }, [data.settings]);
+
+  const setField = (key, value) => setLocalSettings(prev => ({ ...(prev || {}), [key]: value }));
+  const saveSettings = async () => {
+    if (!localSettings) return;
+    setSaving(true);
+    try {
+      const payload = {
+        risk_pct: safeNum(localSettings.risk_pct, 1) || 1,
+        daily_loss_limit_pct: safeNum(localSettings.daily_loss_limit_pct, 2) || 2,
+        max_open_positions: safeNum(localSettings.max_open_positions, 3) || 3,
+        confidence_threshold: safeNum(localSettings.confidence_threshold, 70) || 70,
+        trailing_atr_mult: safeNum(localSettings.trailing_atr_mult, 1.5) || 1.5,
+        partial_close_pct: safeNum(localSettings.partial_close_pct, 50) || 50,
+        correlation_guard: !!localSettings.correlation_guard,
+        updated_at: new Date().toISOString(),
+      };
+      await fetch(`${SB_URL}/rest/v1/bot_settings?id=eq.1`, {
+        method:'PATCH',
+        headers:{ ...SB_JSON_HDR, Prefer:'return=minimal' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      console.warn('Save settings failed:', e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const togglePref = (key) => {
+    const next = { ...prefs, [key]: !prefs[key] };
+    setPrefs(next);
+    LS.set('ui_prefs', next);
+  };
+
+  return (
+    <div className="pp-grid" style={{ gap:20 }}>
+      <div className="pp-grid pp-grid-2x">
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>Account Sync</div>
+          <div className="pp-grid" style={{ gap:12 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap:12 }}>
+              {[
+                ['Firm', accountView.firm || 'FTMO'],
+                ['Size', fmtUsd(accountView.size || 100000)],
+                ['Current P&L', fmtUsd(accountView.currentPnL || 0)],
+                ['Today P&L', fmtUsd(accountView.todayPnL || 0)],
+              ].map(([k, v]) => (
+                <div key={k} className="pp-panel-solid" style={{ padding:12 }}>
+                  <div style={{ color:T.muted, fontSize:10, fontWeight:800, letterSpacing:'.05em' }}>{k}</div>
+                  <div style={{ color:T.text, fontSize:15, fontWeight:800, marginTop:6 }}>{v}</div>
+                </div>
+              ))}
+            </div>
+            <button className="pp-btn pp-btn-primary" onClick={() => onUpdateAccount(true)}>Edit linked account</button>
+          </div>
+        </div>
+
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>UI Preferences</div>
+          <div className="pp-grid" style={{ gap:10 }}>
+            {[
+              ['theme', 'Theme toggle', prefs.theme === 'dark' ? 'Dark premium' : 'Light'],
+              ['push', 'Push notifications', prefs.push ? 'Enabled' : 'Disabled'],
+              ['sound', 'Sound cues', prefs.sound ? 'Enabled' : 'Disabled'],
+              ['summaries', 'Auto summaries', prefs.summaries ? 'Enabled' : 'Disabled'],
+            ].map(([key, label, value]) => (
+              <button key={key} className="pp-btn" onClick={() => key === 'theme' ? (() => {
+                const next = { ...prefs, theme: prefs.theme === 'dark' ? 'light' : 'dark' };
+                setPrefs(next); LS.set('ui_prefs', next);
+              })() : togglePref(key)}>
+                <span style={{ display:'flex', justifyContent:'space-between', width:'100%' }}>
+                  <span>{label}</span>
+                  <span style={{ color:T.sub }}>{value}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="pp-panel" style={{ padding:20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12, marginBottom:14 }}>
+          <div>
+            <div style={{ fontWeight:800, fontSize:16 }}>Risk Profile</div>
+            <div style={{ color:T.sub, fontSize:12, marginTop:4 }}>Connected to `bot_settings` and paper engine safety rules</div>
+          </div>
+          <button className={`pp-btn ${saving ? '' : 'pp-btn-primary'}`} onClick={saveSettings} disabled={saving || !localSettings}>{saving ? 'Saving...' : 'Save sync settings'}</button>
+        </div>
+        {localSettings ? (
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', gap:12 }}>
+            {[
+              ['risk_pct', 'Risk per trade (%)', 'number', '0.1'],
+              ['daily_loss_limit_pct', 'Daily loss limit (%)', 'number', '0.1'],
+              ['max_open_positions', 'Max open positions', 'number', '1'],
+              ['confidence_threshold', 'Min confidence', 'number', '1'],
+              ['trailing_atr_mult', 'Trailing ATR mult', 'number', '0.1'],
+              ['partial_close_pct', 'Partial close at TP1 (%)', 'number', '1'],
+            ].map(([key, label, type, step]) => (
+              <label key={key} className="pp-panel-solid" style={{ padding:12, display:'block' }}>
+                <div style={{ color:T.muted, fontSize:10, fontWeight:800, letterSpacing:'.05em', marginBottom:8 }}>{label}</div>
+                <input
+                  type={type}
+                  step={step}
+                  value={localSettings[key]}
+                  onChange={e => setField(key, e.target.value)}
+                  style={{ width:'100%', padding:'10px 12px', background:'rgba(255,255,255,.04)', border:`1px solid ${T.border}`, borderRadius:8, color:T.text, outline:'none' }}
+                />
+              </label>
+            ))}
+            <label className="pp-panel-solid" style={{ padding:12, display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 }}>
+              <div>
+                <div style={{ color:T.muted, fontSize:10, fontWeight:800, letterSpacing:'.05em', marginBottom:6 }}>Correlation guard</div>
+                <div style={{ color:T.sub, fontSize:12 }}>Block clustered correlated exposure</div>
+              </div>
+              <input type="checkbox" checked={!!localSettings.correlation_guard} onChange={e => setField('correlation_guard', e.target.checked)}/>
+            </label>
+          </div>
+        ) : (
+          <div style={{ color:T.muted, fontSize:13 }}>Loading settings...</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup }) {
+  const titles = {
+    dashboard: ['Dashboard', 'Live operator overview, equity and session context'],
+    signals: ['Signals', 'Embedded SmartChart, Signal Engine and drawing rules'],
+    analytics: ['Analytics', 'Phase 1 outcome tracking with real data'],
+    challenge: ['Challenge', 'Prop rules, buffers and mode controls'],
+    settings: ['Settings', 'Account sync, risk profile and notification preferences'],
+  };
+  const [title, sub] = titles[screen] || titles.dashboard;
+  return (
+    <div className="pp-topbar">
+      <div className="pp-topbar-inner">
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <div className="pp-brand-mark">P</div>
+          <div>
+            <div style={{ fontWeight:900, fontSize:18, letterSpacing:'-.03em' }}>PropPilot <span style={{ color:T.indigo }}>AI</span></div>
+            <div style={{ color:T.sub, fontSize:12 }}>{title} · {sub}</div>
+          </div>
+        </div>
+        <div className="pp-topbar-right" style={{ display:'flex', alignItems:'center', gap:10, marginLeft:'auto' }}>
+          <SyncPill syncState={syncState} rtStatus={rtStatus} lastLoadAt={lastLoadAt}/>
+          <div className="pp-status-pill" style={{ gap:10 }}>
+            <span style={{ color:T.text }}>{accountView.firm}</span>
+            <span style={{ color:T.indigo }}>{fmtUsd(accountView.size || 100000)}</span>
+            <span style={{ color:T.muted }}>{phase.toUpperCase()}</span>
+          </div>
+          <button className="pp-btn" onClick={() => onRefresh('updating')}>Refresh</button>
+          <button className="pp-btn pp-btn-primary" onClick={onSetup}>Account</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // APP SHELL
 // ═══════════════════════════════════════════════════════════════════════════
 
 const TABS = [
-  { id:'dashboard', label:'Dashboard'   },
-  { id:'challenge', label:'Challenge'   },
-  { id:'check',     label:'Check Trade' },
-  { id:'risk',      label:'⚖️ Risk Calc' },
-  { id:'journal',   label:'AI Journal'  },
+  { id:'dashboard', label:'Dashboard', icon:'📊' },
+  { id:'signals',   label:'Signals',   icon:'⚡' },
+  { id:'analytics', label:'Analytics', icon:'📈' },
+  { id:'challenge', label:'Challenge', icon:'🎯' },
+  { id:'settings',  label:'Settings',  icon:'⚙️' },
 ];
 
 function PropPilotAI() {
-  // ── State with localStorage persistence ──────────────────────────────────
-  const [screen,    setScreen]    = useState(() => LS.get('screen', 'dashboard'));
-  const [phase,     setPhase]     = useState(() => LS.get('phase', 's1'));
+  const hashScreen = useCallback(() => {
+    const raw = window.location.hash.replace('#', '');
+    return TABS.some(t => t.id === raw) ? raw : null;
+  }, []);
+  const [screen, setScreen] = useState(() => hashScreen() || LS.get('screen', 'dashboard'));
+  const [phase, setPhase] = useState(() => LS.get('phase', 's1'));
   const [showSetup, setShowSetup] = useState(false);
-  const [account,   setAccount]   = useState(() => LS.get('account', {
-    firm:'FTMO', size:100000, currentPnL:2340, todayPnL:-450, tradingDays:7,
+  const [account, setAccount] = useState(() => LS.get('account', {
+    firm:'FTMO', size:100000, currentPnL:0, todayPnL:0, tradingDays:7,
   }));
-  const [trades,    setTrades]    = useState(() => LS.get('trades', DEFAULT_TRADES));
+  const appData = useUnifiedAppData();
 
-  // Persist to localStorage whenever state changes
-  useEffect(() => { LS.set('screen',  screen);  }, [screen]);
-  useEffect(() => { LS.set('phase',   phase);   }, [phase]);
+  useEffect(() => { LS.set('screen', screen); }, [screen]);
+  useEffect(() => { LS.set('phase', phase); }, [phase]);
   useEffect(() => { LS.set('account', account); }, [account]);
-  useEffect(() => { LS.set('trades',  trades);  }, [trades]);
+  useEffect(() => {
+    if (window.location.hash.replace('#', '') !== screen) window.location.hash = screen;
+  }, [screen]);
+  useEffect(() => {
+    const onHash = () => {
+      const next = hashScreen();
+      if (next) setScreen(next);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [hashScreen]);
 
-  const handleSetAccount = (acc) => {
-    setAccount(acc);
-  };
-
-  // ── Derive effective account from challenge if one is configured ──────────
-  // Challenge stores real firm/size/P&L. Prefer that over the manual setup.
-  const effectiveAccount = React.useMemo(() => {
+  const handleSetAccount = (acc) => setAccount(acc);
+  const accountView = useMemo(() => {
     const ch = LS.get('challenge', null);
     if (ch && ch.firmId && ch.size) {
       const firm = PROP_FIRMS[ch.firmId];
@@ -2466,63 +3343,60 @@ function PropPilotAI() {
       };
     }
     return account;
-  }, [account, screen]); // re-compute when screen changes (challenge may have been updated)
+  }, [account, screen]);
 
   return (
-    <div style={{ minHeight:'100vh', background:T.bg, color:T.text, fontFamily:"'Inter',system-ui,sans-serif" }}>
+    <div className="pp-app-shell">
       {showSetup && <SetupModal account={account} setAccount={handleSetAccount} onClose={() => setShowSetup(false)}/>}
+      <UnifiedAppHeader
+        screen={screen}
+        phase={phase}
+        accountView={accountView}
+        syncState={appData.syncState}
+        rtStatus={appData.rtStatus}
+        lastLoadAt={appData.lastLoadAt}
+        onRefresh={appData.refresh}
+        onSetup={() => setShowSetup(true)}
+      />
 
-      {/* Top bar */}
-      <div className="pp-topbar" style={{ borderBottom:`1px solid ${T.border}`, background:'rgba(7,8,16,0.97)', position:'sticky', top:0, zIndex:100, padding:'0 32px' }}>
-        <div className="pp-topbar-inner" style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:64 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ width:34, height:34, borderRadius:9, background:`linear-gradient(135deg,${T.amber},#B85500)`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, fontWeight:900, userSelect:'none' }}>✈</div>
-            <span style={{ fontWeight:900, fontSize:19, letterSpacing:'-0.03em' }}>PropPilot <span style={{ color:T.amber }}>AI</span></span>
-          </div>
-          <div className="pp-topbar-right" style={{ display:'flex', gap:10, alignItems:'center' }}>
-            <div style={{ display:'flex', gap:3, padding:'4px', background:'rgba(255,255,255,0.04)', border:`1px solid ${T.border}`, borderRadius:10 }}>
-              {Object.entries(PHASES).map(([id,p]) => (
-                <button key={id} onClick={() => setPhase(id)} style={{ padding:'5px 12px', borderRadius:7, border:'none', cursor:'pointer', background:phase===id?T.amber:'transparent', color:phase===id?'#000':T.muted, fontSize:12, fontWeight:700, transition:'all 0.15s' }}>
-                  {p.tag}
-                </button>
-              ))}
-            </div>
-            <button onClick={() => setShowSetup(true)} style={{ padding:'5px 14px', background:'rgba(245,166,35,0.09)', border:'1px solid rgba(245,166,35,0.24)', borderRadius:8, fontSize:13, cursor:'pointer' }}>
-              <span style={{ color:T.muted }}>{account.firm}</span>
-              <span style={{ color:T.amber, fontWeight:700, margin:'0 6px' }}>${account.size.toLocaleString()}</span>
-              <span style={{ color:T.muted }}>· {PHASES[phase].label}</span>
-              <span style={{ color:T.muted, marginLeft:6, fontSize:11 }}>✎</span>
-            </button>
-            <a href="analytics.html" style={{ padding:'5px 14px', background:'rgba(245,166,35,0.09)', border:'1px solid rgba(245,166,35,0.28)', borderRadius:8, fontSize:13, fontWeight:700, color:'#F5A623', textDecoration:'none', whiteSpace:'nowrap' }}>
-              📊 Analytics
-            </a>
-            <a href="roadmap.html" style={{ padding:'5px 14px', background:'rgba(45,212,191,0.09)', border:'1px solid rgba(45,212,191,0.28)', borderRadius:8, fontSize:13, fontWeight:700, color:'#2DD4BF', textDecoration:'none', whiteSpace:'nowrap' }}>
-              🗺 Roadmap
-            </a>
-            <a href="signal.html" style={{ padding:'5px 14px', background:'rgba(129,140,248,0.09)', border:'1px solid rgba(129,140,248,0.28)', borderRadius:8, fontSize:13, fontWeight:700, color:'#818CF8', textDecoration:'none', whiteSpace:'nowrap' }}>
-              🔍 Signal Engine
-            </a>
-            <div style={{ display:'flex', gap:6, alignItems:'center', padding:'5px 12px', background:'rgba(52,211,153,0.09)', border:'1px solid rgba(52,211,153,0.22)', borderRadius:8, fontSize:12, fontWeight:700, color:T.green }}>
-              <div style={{ width:7, height:7, borderRadius:4, background:T.green, boxShadow:`0 0 7px ${T.green}` }}/>LIVE
-            </div>
-          </div>
-        </div>
-        <div className="pp-tabs" style={{ display:'flex', gap:2 }}>
-          {TABS.map(t => (
-            <button key={t.id} onClick={() => setScreen(t.id)} style={{ padding:'11px 22px', background:'transparent', border:'none', borderBottom:`2px solid ${screen===t.id?T.amber:'transparent'}`, color:screen===t.id?T.amber:T.muted, fontSize:14, fontWeight:screen===t.id?700:400, cursor:'pointer', transition:'all 0.2s', whiteSpace:'nowrap' }}>
-              {t.label}
+      <div className="pp-content">
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:20 }}>
+          {Object.entries(PHASES).map(([id, p]) => (
+            <button
+              key={id}
+              className={`pp-btn ${phase === id ? 'pp-btn-primary' : ''}`}
+              onClick={() => setPhase(id)}
+            >
+              {p.tag} · {p.label}
             </button>
           ))}
+          <a href="analytics.html" className="pp-btn" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center' }}>Open standalone analytics</a>
+          <a href="signal.html" className="pp-btn" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center' }}>Open standalone signal engine</a>
         </div>
+
+        {appData.loading ? (
+          <div className="pp-grid pp-grid-4x">
+            {Array.from({ length: 8 }, (_, i) => <div key={i} className="pp-skeleton" style={{ height: i < 4 ? 120 : 260 }}/>)}
+          </div>
+        ) : (
+          <>
+            {screen === 'dashboard' && <ExecutiveDashboard data={appData} phase={phase}/>}
+            {screen === 'signals' && <SignalsWorkspace/>}
+            {screen === 'analytics' && <OutcomeAnalyticsPanel data={appData}/>}
+            {screen === 'challenge' && <ChallengeMode account={accountView} phase={phase}/>}
+            {screen === 'settings' && <SettingsWorkbench data={appData} accountView={accountView} onUpdateAccount={() => setShowSetup(true)}/>}
+          </>
+        )}
       </div>
 
-      <div className="pp-content" style={{ padding:32 }}>
-        {screen === 'dashboard' && <Dashboard     account={effectiveAccount} phase={phase}/>}
-        {screen === 'challenge' && <ChallengeMode account={effectiveAccount} phase={phase}/>}
-        {screen === 'check'     && <CheckTrade    account={effectiveAccount} phase={phase}/>}
-        {screen === 'risk'      && <RiskCalc      account={effectiveAccount}/>}
-        {screen === 'journal'   && <Journal trades={trades} setTrades={setTrades}/>}
-      </div>
+      <nav className="pp-bottom-nav" aria-label="Primary">
+        {TABS.map(tab => (
+          <button key={tab.id} className={`pp-nav-item ${screen === tab.id ? 'active' : ''}`} onClick={() => setScreen(tab.id)}>
+            <span className="pp-nav-icon">{tab.icon}</span>
+            <span className="pp-nav-label">{tab.label}</span>
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }

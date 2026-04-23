@@ -41,6 +41,7 @@
 
 <script type="text/babel">
 const { useState, useEffect, useCallback, useRef } = React;
+const EMBEDDED = new URLSearchParams(window.location.search).get('embed') === '1';
 
 const API          = 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1';
 const SB_URL       = 'https://nxiednydxyrtxpkmgtof.supabase.co';
@@ -956,36 +957,38 @@ function SignalEngine() {
   const meta = sig ? (STATE_META[sig.state]||STATE_META.AVOID_CHOP) : null;
 
   return (
-    <div style={{ minHeight:'100vh', background:C.bg, color:C.text }}>
+    <div style={{ minHeight: EMBEDDED ? 'auto' : '100vh', background:C.bg, color:C.text }}>
 
       {/* ── NAV ── */}
-      <div style={{ borderBottom:`1px solid ${C.border}`, background:'rgba(6,7,16,0.96)', padding:'0 32px', position:'sticky', top:0, zIndex:100 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:58 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ width:30,height:30,borderRadius:8,background:`linear-gradient(135deg,${C.amber},#B85500)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:900 }}>✈</div>
-            <span style={{ fontWeight:900,fontSize:16,letterSpacing:'-0.03em' }}>PropPilot <span style={{color:C.amber}}>AI</span></span>
-            <span style={{ color:C.muted,fontSize:12,marginLeft:4 }}>/ Signal Engine</span>
-          </div>
-          <div style={{ display:'flex', gap:10, alignItems:'center' }}>
-            <div style={{ display:'flex',gap:5,alignItems:'center',padding:'4px 10px',background:'rgba(52,211,153,0.09)',border:'1px solid rgba(52,211,153,0.22)',borderRadius:7,fontSize:11,fontWeight:700,color:C.green }}>
-              <div style={{ width:6,height:6,borderRadius:3,background:C.green,boxShadow:`0 0 6px ${C.green}` }}/>LIVE
+      {!EMBEDDED && (
+        <div style={{ borderBottom:`1px solid ${C.border}`, background:'rgba(6,7,16,0.96)', padding:'0 32px', position:'sticky', top:0, zIndex:100 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', height:58 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <div style={{ width:30,height:30,borderRadius:8,background:`linear-gradient(135deg,${C.amber},#B85500)`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:900 }}>✈</div>
+              <span style={{ fontWeight:900,fontSize:16,letterSpacing:'-0.03em' }}>PropPilot <span style={{color:C.amber}}>AI</span></span>
+              <span style={{ color:C.muted,fontSize:12,marginLeft:4 }}>/ Signal Engine</span>
             </div>
-            <a href="index.html" style={{ color:C.muted,fontSize:13,textDecoration:'none',padding:'5px 12px',border:`1px solid ${C.border}`,borderRadius:7 }}>← PropPilot OS</a>
+            <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+              <div style={{ display:'flex',gap:5,alignItems:'center',padding:'4px 10px',background:'rgba(52,211,153,0.09)',border:'1px solid rgba(52,211,153,0.22)',borderRadius:7,fontSize:11,fontWeight:700,color:C.green }}>
+                <div style={{ width:6,height:6,borderRadius:3,background:C.green,boxShadow:`0 0 6px ${C.green}` }}/>LIVE
+              </div>
+              <a href="index.html" style={{ color:C.muted,fontSize:13,textDecoration:'none',padding:'5px 12px',border:`1px solid ${C.border}`,borderRadius:7 }}>← PropPilot OS</a>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* ── HERO + SEARCH ── */}
-      <div style={{ maxWidth:980, margin:'0 auto' }} className="s-content" style={{ padding:'0 28px' }}>
-        <div style={{ textAlign:'center', padding:'44px 0 30px' }}>
+      <div className="s-content" style={{ maxWidth: EMBEDDED ? 1320 : 980, margin:'0 auto', padding:'0 28px' }}>
+        <div style={{ textAlign: EMBEDDED ? 'left' : 'center', padding: EMBEDDED ? '24px 0 18px' : '44px 0 30px' }}>
           <div style={{ display:'inline-flex',alignItems:'center',gap:8,padding:'5px 14px',background:'rgba(245,166,35,0.09)',border:'1px solid rgba(245,166,35,0.22)',borderRadius:20,marginBottom:16 }}>
-            <span style={{ color:C.amber,fontSize:12,fontWeight:700 }}>⚡ STATE MACHINE · SCENARIO ENGINE · REAL DATA</span>
+            <span style={{ color:C.amber,fontSize:12,fontWeight:700 }}>{EMBEDDED ? '⚡ EMBEDDED SIGNAL WORKSPACE' : '⚡ STATE MACHINE · SCENARIO ENGINE · REAL DATA'}</span>
           </div>
-          <div className="hero-title" style={{ fontSize:42,fontWeight:900,letterSpacing:'-0.03em',lineHeight:1.1,marginBottom:12 }}>
-            Not BUY/SELL — <span style={{color:C.amber}}>Actionable decisions.</span>
+          <div className="hero-title" style={{ fontSize: EMBEDDED ? 30 : 42, fontWeight:900,letterSpacing:'-0.03em',lineHeight:1.1,marginBottom:12 }}>
+            {EMBEDDED ? <>SmartChart + <span style={{color:C.amber}}>actionable states</span></> : <>Not BUY/SELL — <span style={{color:C.amber}}>Actionable decisions.</span></>}
           </div>
-          <div style={{ color:C.sub,fontSize:16,lineHeight:1.65,maxWidth:540,margin:'0 auto' }}>
-            Live TA + Scenario Engine: <strong>ENTER NOW / WAIT FOR / AVOID</strong> with exact price triggers, what-if scenarios, and invalidation levels.
+          <div style={{ color:C.sub,fontSize: EMBEDDED ? 14 : 16,lineHeight:1.65,maxWidth: EMBEDDED ? 760 : 540,margin: EMBEDDED ? '0' : '0 auto' }}>
+            Live TA + Scenario Engine: <strong>ENTER NOW / WAIT FOR / AVOID</strong> with exact price triggers, what-if scenarios, invalidation levels and DB-driven drawing rules.
           </div>
         </div>
 

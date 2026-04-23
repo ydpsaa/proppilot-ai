@@ -1,0 +1,585 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// PropPilot AI — auto-analyze Edge Function
+// Fetches OHLCV from Twelve Data, runs SMC/ICT analysis, saves to smc_signals,
+// generates AI narrative via Groq, persists to bot_memory.
+// Triggered by pg_cron 5×/day (session opens) or manually via GET/POST.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.2';
+
+const SB_URL     = Deno.env.get('SUPABASE_URL')!;
+const SB_SKEY    = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const TD_KEY     = Deno.env.get('TWELVE_DATA_KEY') || '';
+const GROQ_KEY   = Deno.env.get('GROQ_API_KEY')   || '';
+
+const sb = createClient(SB_URL, SB_SKEY, { auth: { persistSession: false } });
+
+const CORS = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Headers': 'Authorization,Content-Type,apikey',
+  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+};
+
+// ── Symbols to analyze ───────────────────────────────────────────────────────
+const SYMBOLS = [
+  { symbol: 'XAU/USD', td: 'XAU/USD', type: 'commodity', pip: 0.01  },
+  { symbol: 'EUR/USD', td: 'EUR/USD', type: 'forex',     pip: 0.0001 },
+  { symbol: 'GBP/USD', td: 'GBP/USD', type: 'forex',     pip: 0.0001 },
+  { symbol: 'USD/JPY', td: 'USD/JPY', type: 'forex',     pip: 0.01  },
+  { symbol: 'NAS100',  td: 'QQQ',     type: 'index',     pip: 1.0   },
+  { symbol: 'BTC/USD', td: 'BTC/USD', type: 'crypto',    pip: 1.0   },
+];
+
+// ── Types ────────────────────────────────────────────────────────────────────
+type Candle = { time: number; open: number; high: number; low: number; close: number; volume?: number };
+
+interface SignalResult {
+  symbol:         string;
+  verdict:        'LONG_NOW' | 'SHORT_NOW' | 'WAIT_LONG' | 'WAIT_SHORT' | 'NO_TRADE';
+  confidence:     number;
+  direction:      'LONG' | 'SHORT' | null;
+  entry_price:    number | null;
+  sl_price:       number | null;
+  tp1_price:      number | null;
+  tp2_price:      number | null;
+  risk_reward:    number | null;
+  atr:            number | null;
+  session_name:   string;
+  htf_trend:      'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  sweep_occurred: boolean;
+  mss_occurred:   boolean;
+  displacement:   boolean;
+  reasoning_codes: string[];
+  signal_json:    Record<string, unknown>;
+  ai_narrative:   string;
+  invalidation:   string;
+  data_status:    'live' | 'demo' | 'error';
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status, headers: { ...CORS, 'Content-Type': 'application/json' },
+  });
+}
+
+function detectSession(): string {
+  const h = new Date().getUTCHours();
+  if (h < 7)          return 'Asia';
+  if (h === 7)        return 'Frankfurt';
+  if (h >= 8  && h < 12) return 'London';
+  if (h >= 12 && h < 17) return 'Overlap';
+  if (h >= 17 && h < 21) return 'NewYork';
+  return 'Dead';
+}
+
+// ── Fetch OHLCV from Twelve Data ─────────────────────────────────────────────
+async function fetchCandles(tdSymbol: string, interval = '15min', outputsize = 200): Promise<Candle[]> {
+  if (!TD_KEY) throw new Error('TWELVE_DATA_KEY not set');
+
+  const url = new URL('https://api.twelvedata.com/time_series');
+  url.searchParams.set('symbol', tdSymbol);
+  url.searchParams.set('interval', interval);
+  url.searchParams.set('outputsize', String(outputsize));
+  url.searchParams.set('apikey', TD_KEY);
+  url.searchParams.set('format', 'JSON');
+
+  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10_000) });
+  const data = await res.json();
+
+  if (data.status === 'error' || !Array.isArray(data.values)) {
+    throw new Error(data.message || `No candles for ${tdSymbol}`);
+  }
+
+  return (data.values as Record<string, string>[])
+    .map(v => ({
+      time:   Date.parse(v.datetime + (v.datetime.includes('T') ? '' : 'Z')),
+      open:   parseFloat(v.open),
+      high:   parseFloat(v.high),
+      low:    parseFloat(v.low),
+      close:  parseFloat(v.close),
+      volume: v.volume ? parseFloat(v.volume) : undefined,
+    }))
+    .filter(c => isFinite(c.time) && isFinite(c.open))
+    .sort((a, b) => a.time - b.time);
+}
+
+// ── ATR calculation ──────────────────────────────────────────────────────────
+function calcATR(candles: Candle[], period = 14): number {
+  if (candles.length < period + 1) return 0;
+  const trs = candles.slice(1).map((c, i) => {
+    const prev = candles[i];
+    return Math.max(c.high - c.low, Math.abs(c.high - prev.close), Math.abs(c.low - prev.close));
+  });
+  return trs.slice(-period).reduce((s, x) => s + x, 0) / period;
+}
+
+// ── EMA ──────────────────────────────────────────────────────────────────────
+function calcEMA(values: number[], period: number): number {
+  if (values.length < period) return values[values.length - 1] || 0;
+  const k = 2 / (period + 1);
+  let ema = values.slice(0, period).reduce((s, x) => s + x, 0) / period;
+  for (let i = period; i < values.length; i++) ema = values[i] * k + ema * (1 - k);
+  return ema;
+}
+
+// ── RSI ──────────────────────────────────────────────────────────────────────
+function calcRSI(closes: number[], period = 14): number {
+  if (closes.length < period + 1) return 50;
+  let gains = 0, losses = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const d = closes[i] - closes[i - 1];
+    if (d > 0) gains += d; else losses -= d;
+  }
+  const rs = losses === 0 ? 100 : gains / losses;
+  return 100 - 100 / (1 + rs);
+}
+
+// ── Swing High/Low detection ─────────────────────────────────────────────────
+function swingHighs(candles: Candle[], lookback = 5): number[] {
+  const highs: number[] = [];
+  for (let i = lookback; i < candles.length - lookback; i++) {
+    const h = candles[i].high;
+    const isHigh = candles.slice(i - lookback, i).every(c => c.high < h) &&
+                   candles.slice(i + 1, i + lookback + 1).every(c => c.high < h);
+    if (isHigh) highs.push(h);
+  }
+  return highs;
+}
+
+function swingLows(candles: Candle[], lookback = 5): number[] {
+  const lows: number[] = [];
+  for (let i = lookback; i < candles.length - lookback; i++) {
+    const l = candles[i].low;
+    const isLow = candles.slice(i - lookback, i).every(c => c.low > l) &&
+                  candles.slice(i + 1, i + lookback + 1).every(c => c.low > l);
+    if (isLow) lows.push(l);
+  }
+  return lows;
+}
+
+// ── Liquidity sweep detection ────────────────────────────────────────────────
+function detectSweep(candles: Candle[], highs: number[], lows: number[], atr: number): {
+  bullSweep: boolean; bearSweep: boolean; lastSweptHigh: number | null; lastSweptLow: number | null;
+} {
+  const last5 = candles.slice(-5);
+  const threshold = atr * 0.3;
+  let bullSweep = false, bearSweep = false;
+  let lastSweptHigh: number | null = null, lastSweptLow: number | null = null;
+
+  for (const candle of last5) {
+    for (const h of highs.slice(-8)) {
+      if (candle.high > h && candle.close < h + threshold) {
+        bearSweep = true; lastSweptHigh = h;
+      }
+    }
+    for (const l of lows.slice(-8)) {
+      if (candle.low < l && candle.close > l - threshold) {
+        bullSweep = true; lastSweptLow = l;
+      }
+    }
+  }
+  return { bullSweep, bearSweep, lastSweptHigh, lastSweptLow };
+}
+
+// ── Market Structure Shift ───────────────────────────────────────────────────
+function detectMSS(candles: Candle[], direction: 'BULL' | 'BEAR', lastSwing: number | null): boolean {
+  if (!lastSwing || candles.length < 10) return false;
+  const last3 = candles.slice(-3);
+  if (direction === 'BULL') {
+    // Bullish MSS: price breaks above last swing high after sweeping a low
+    return last3.some(c => c.close > lastSwing);
+  } else {
+    // Bearish MSS: price breaks below last swing low after sweeping a high
+    return last3.some(c => c.close < lastSwing);
+  }
+}
+
+// ── OTE (Optimal Trade Entry) zone — 61.8-79% Fibonacci retracement ─────────
+function calcOTE(swingStart: number, swingEnd: number, direction: 'BULL' | 'BEAR'): { lo: number; hi: number } {
+  const range = Math.abs(swingEnd - swingStart);
+  if (direction === 'BULL') {
+    return { lo: swingEnd - range * 0.79, hi: swingEnd - range * 0.618 };
+  } else {
+    return { lo: swingEnd + range * 0.618, hi: swingEnd + range * 0.79 };
+  }
+}
+
+// ── Core SMC Analysis ────────────────────────────────────────────────────────
+function analyzeSMC(
+  symbol: string,
+  candles15m: Candle[],
+  candles1h: Candle[],
+  pip: number,
+  session: string,
+): Omit<SignalResult, 'ai_narrative'> {
+
+  const closes15m = candles15m.map(c => c.close);
+  const closes1h  = candles1h.map(c => c.close);
+  const last = candles15m[candles15m.length - 1];
+  const price = last.close;
+  const atr = calcATR(candles15m);
+
+  // Indicators
+  const ema20  = calcEMA(closes15m, 20);
+  const ema50  = calcEMA(closes15m, 50);
+  const ema200 = calcEMA(closes15m, 200);
+  const ema50h = calcEMA(closes1h, 50);
+  const rsi    = calcRSI(closes15m);
+
+  // HTF trend from 1h
+  const htfTrend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' =
+    closes1h[closes1h.length - 1] > ema50h * 1.001 ? 'BULLISH' :
+    closes1h[closes1h.length - 1] < ema50h * 0.999 ? 'BEARISH' : 'NEUTRAL';
+
+  // Swing levels
+  const sh15 = swingHighs(candles15m, 5);
+  const sl15 = swingLows(candles15m, 5);
+  const sh1h = swingHighs(candles1h, 5);
+  const sl1h = swingLows(candles1h, 5);
+
+  // Sweep detection on 15m
+  const sweep = detectSweep(candles15m, sh15, sl15, atr);
+  const sweep1h = detectSweep(candles1h, sh1h, sl1h, atr);
+  const sweepOccurred = sweep.bullSweep || sweep.bearSweep || sweep1h.bullSweep || sweep1h.bearSweep;
+
+  // MSS detection
+  const mssBull = detectMSS(candles15m, 'BULL', sweep.lastSweptLow);
+  const mssBear = detectMSS(candles15m, 'BEAR', sweep.lastSweptHigh);
+  const mssOccurred = mssBull || mssBear;
+
+  // Displacement candle check (strong momentum candle)
+  const last3 = candles15m.slice(-3);
+  const displacement = last3.some(c => Math.abs(c.close - c.open) > atr * 0.8);
+
+  // Scoring
+  const reasons: string[] = [];
+  let bullScore = 0, bearScore = 0;
+
+  // HTF alignment
+  if (htfTrend === 'BULLISH') { bullScore += 25; reasons.push('HTF_BULL'); }
+  if (htfTrend === 'BEARISH') { bearScore += 25; reasons.push('HTF_BEAR'); }
+
+  // EMA structure
+  if (ema20 > ema50 && ema50 > ema200) { bullScore += 15; reasons.push('EMA_BULL_STACK'); }
+  if (ema20 < ema50 && ema50 < ema200) { bearScore += 15; reasons.push('EMA_BEAR_STACK'); }
+  if (price > ema200) { bullScore += 10; reasons.push('PRICE_ABOVE_EMA200'); }
+  if (price < ema200) { bearScore += 10; reasons.push('PRICE_BELOW_EMA200'); }
+
+  // Sweep + MSS (core SMC setup)
+  if (sweep.bullSweep && mssBull) { bullScore += 30; reasons.push('BULL_SWEEP_MSS'); }
+  if (sweep.bearSweep && mssBear) { bearScore += 30; reasons.push('BEAR_SWEEP_MSS'); }
+  if (sweep1h.bullSweep) { bullScore += 10; reasons.push('HTF_BULL_SWEEP'); }
+  if (sweep1h.bearSweep) { bearScore += 10; reasons.push('HTF_BEAR_SWEEP'); }
+
+  // RSI
+  if (rsi < 35 && htfTrend === 'BULLISH') { bullScore += 10; reasons.push('RSI_OVERSOLD_BULL'); }
+  if (rsi > 65 && htfTrend === 'BEARISH') { bearScore += 10; reasons.push('RSI_OVERBOUGHT_BEAR'); }
+  if (rsi > 60) { bullScore += 5;  reasons.push('RSI_BULLISH'); }
+  if (rsi < 40) { bearScore += 5;  reasons.push('RSI_BEARISH'); }
+
+  // Displacement
+  if (displacement && mssBull) { bullScore += 10; reasons.push('DISPLACEMENT_BULL'); }
+  if (displacement && mssBear) { bearScore += 10; reasons.push('DISPLACEMENT_BEAR'); }
+
+  // Session bonus (best sessions for clean setups)
+  if (['London', 'Overlap', 'NewYork'].includes(session)) {
+    bullScore += 5; bearScore += 5; reasons.push(`SESSION_${session.toUpperCase()}`);
+  }
+
+  const netScore = bullScore - bearScore;
+  const totalScore = Math.max(bullScore, bearScore);
+  const confidence = Math.min(95, Math.round(totalScore * 0.9));
+
+  // Verdict
+  let verdict: SignalResult['verdict'] = 'NO_TRADE';
+  let direction: 'LONG' | 'SHORT' | null = null;
+
+  if (bullScore >= 60 && netScore >= 15) {
+    verdict = (bullScore >= 75 && mssOccurred) ? 'LONG_NOW' : 'WAIT_LONG';
+    direction = 'LONG';
+  } else if (bearScore >= 60 && netScore <= -15) {
+    verdict = (bearScore >= 75 && mssOccurred) ? 'SHORT_NOW' : 'WAIT_SHORT';
+    direction = 'SHORT';
+  }
+
+  // Trade levels
+  let entryPrice: number | null = null;
+  let slPrice: number | null = null;
+  let tp1Price: number | null = null;
+  let tp2Price: number | null = null;
+  let riskReward: number | null = null;
+
+  if (direction && atr > 0) {
+    if (direction === 'LONG' && sweep.lastSweptLow) {
+      const ote = calcOTE(sweep.lastSweptLow, price, 'BULL');
+      entryPrice = ote.hi;
+      slPrice    = sweep.lastSweptLow - atr * 0.3;
+      const risk = entryPrice - slPrice;
+      tp1Price   = entryPrice + risk * 2.2;
+      tp2Price   = entryPrice + risk * 3.6;
+      riskReward = risk > 0 ? parseFloat((risk * 2.2 / risk).toFixed(2)) : null;
+    } else if (direction === 'SHORT' && sweep.lastSweptHigh) {
+      const ote = calcOTE(price, sweep.lastSweptHigh, 'BEAR');
+      entryPrice = ote.lo;
+      slPrice    = sweep.lastSweptHigh + atr * 0.3;
+      const risk = slPrice - entryPrice;
+      tp1Price   = entryPrice - risk * 2.2;
+      tp2Price   = entryPrice - risk * 3.6;
+      riskReward = risk > 0 ? parseFloat((risk * 2.2 / risk).toFixed(2)) : null;
+    } else {
+      // Fallback levels if no sweep point found
+      entryPrice = price;
+      slPrice    = direction === 'LONG' ? price - atr * 1.4 : price + atr * 1.4;
+      const risk = Math.abs(entryPrice - slPrice);
+      tp1Price   = direction === 'LONG' ? price + risk * 2.2 : price - risk * 2.2;
+      tp2Price   = direction === 'LONG' ? price + risk * 3.6 : price - risk * 3.6;
+      riskReward = 2.2;
+    }
+  }
+
+  const invalidation = direction === 'LONG'
+    ? `Invalidated if price closes below ${slPrice?.toFixed(4) || 'SL'}`
+    : direction === 'SHORT'
+    ? `Invalidated if price closes above ${slPrice?.toFixed(4) || 'SL'}`
+    : 'No active setup';
+
+  return {
+    symbol,
+    verdict,
+    confidence,
+    direction,
+    entry_price: entryPrice ? parseFloat(entryPrice.toFixed(5)) : null,
+    sl_price:    slPrice    ? parseFloat(slPrice.toFixed(5))    : null,
+    tp1_price:   tp1Price   ? parseFloat(tp1Price.toFixed(5))   : null,
+    tp2_price:   tp2Price   ? parseFloat(tp2Price.toFixed(5))   : null,
+    risk_reward: riskReward,
+    atr:         parseFloat(atr.toFixed(6)),
+    session_name: session,
+    htf_trend:   htfTrend,
+    sweep_occurred: sweepOccurred,
+    mss_occurred:   mssOccurred,
+    displacement,
+    reasoning_codes: reasons,
+    invalidation,
+    data_status: 'live',
+    signal_json: {
+      price, ema20, ema50, ema200, rsi,
+      bullScore, bearScore, netScore,
+      atr, session,
+    },
+  };
+}
+
+// ── Groq AI narrative ────────────────────────────────────────────────────────
+async function generateNarrative(sig: Omit<SignalResult, 'ai_narrative'>, sessionSignals: Omit<SignalResult, 'ai_narrative'>[]): Promise<string> {
+  if (!GROQ_KEY) return '';
+
+  const actionable = sessionSignals.filter(s => s.verdict === 'LONG_NOW' || s.verdict === 'SHORT_NOW');
+
+  const prompt = `You are a professional prop trader AI. Analyze these signals and provide a brief market read (max 150 words):
+
+Session: ${sig.session_name} | Time: ${new Date().toUTCString()}
+Actionable signals this cycle: ${actionable.length}/${sessionSignals.length}
+
+${sig.symbol}: ${sig.verdict} | ${sig.direction || 'NEUTRAL'} | ${sig.confidence}% confidence
+HTF: ${sig.htf_trend} | Sweep: ${sig.sweep_occurred} | MSS: ${sig.mss_occurred}
+${sig.entry_price ? `Entry: ${sig.entry_price} | SL: ${sig.sl_price} | TP1: ${sig.tp1_price} | TP2: ${sig.tp2_price}` : 'No trade levels'}
+Reasons: ${sig.reasoning_codes.join(', ')}
+
+All signals summary:
+${sessionSignals.map(s => `${s.symbol}: ${s.verdict} (${s.confidence}%)`).join('\n')}
+
+Write 2-3 sentences: market context, what the structure shows, and key risk. Be direct and specific.`;
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 200,
+        temperature: 0.4,
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+// ── Generate session summary for bot_memory ──────────────────────────────────
+async function generateSessionSummary(signals: Omit<SignalResult, 'ai_narrative'>[]): Promise<string> {
+  if (!GROQ_KEY || !signals.length) return '';
+
+  const actionable = signals.filter(s => s.verdict === 'LONG_NOW' || s.verdict === 'SHORT_NOW');
+
+  const prompt = `You are a professional prop trading AI. Summarize this ${signals[0].session_name} session analysis (max 200 words):
+
+Signals analyzed: ${signals.length}
+Actionable (LONG_NOW/SHORT_NOW): ${actionable.length}
+
+${signals.map(s => `${s.symbol}: ${s.verdict} | ${s.confidence}% | HTF:${s.htf_trend} | Sweep:${s.sweep_occurred} | MSS:${s.mss_occurred}`).join('\n')}
+
+Provide:
+1. Overall market bias for this session
+2. Best opportunities (if any)
+3. Key risks/what to watch
+4. One lesson for the next cycle
+
+Be specific, max 150 words.`;
+
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GROQ_KEY}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 250,
+        temperature: 0.3,
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+// ── Main handler ─────────────────────────────────────────────────────────────
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+
+  const started = Date.now();
+  const session = detectSession();
+  const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
+  const symbolFilter: string | null = body.symbol || new URL(req.url).searchParams.get('symbol') || null;
+  const dryRun = body.dryRun === true || new URL(req.url).searchParams.get('dryRun') === 'true';
+
+  const toAnalyze = symbolFilter
+    ? SYMBOLS.filter(s => s.symbol === symbolFilter || s.td === symbolFilter)
+    : SYMBOLS;
+
+  const results: SignalResult[] = [];
+  const errors: { symbol: string; error: string }[] = [];
+
+  // Rate limit: Twelve Data free = 8 req/min — process sequentially with small delay
+  for (const sym of toAnalyze) {
+    try {
+      const [candles15m, candles1h] = await Promise.all([
+        fetchCandles(sym.td, '15min', 200),
+        fetchCandles(sym.td, '1h', 100),
+      ]);
+
+      const sig = analyzeSMC(sym.symbol, candles15m, candles1h, sym.pip, session);
+      const narrative = await generateNarrative(sig, results.map(r => ({ ...r })));
+
+      results.push({ ...sig, ai_narrative: narrative });
+
+      // Small delay to respect rate limits on free tier
+      if (toAnalyze.length > 1) await new Promise(r => setTimeout(r, 800));
+
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[auto-analyze] ${sym.symbol}:`, message);
+      errors.push({ symbol: sym.symbol, error: message });
+
+      // Still create a NO_TRADE signal so we have a record
+      results.push({
+        symbol: sym.symbol,
+        verdict: 'NO_TRADE',
+        confidence: 0,
+        direction: null,
+        entry_price: null, sl_price: null, tp1_price: null, tp2_price: null,
+        risk_reward: null, atr: null,
+        session_name: session,
+        htf_trend: 'NEUTRAL',
+        sweep_occurred: false, mss_occurred: false, displacement: false,
+        reasoning_codes: ['DATA_ERROR'],
+        signal_json: { error: message },
+        ai_narrative: '',
+        invalidation: 'Data unavailable',
+        data_status: 'error',
+      });
+    }
+  }
+
+  // ── Persist to smc_signals ────────────────────────────────────────────────
+  if (!dryRun && results.length > 0) {
+    const rows = results.map(sig => ({
+      symbol:          sig.symbol,
+      timeframe:       'm15',
+      verdict:         sig.verdict,
+      confidence:      sig.confidence,
+      direction:       sig.direction,
+      entry_price:     sig.entry_price,
+      sl_price:        sig.sl_price,
+      tp1_price:       sig.tp1_price,
+      tp2_price:       sig.tp2_price,
+      risk_reward:     sig.risk_reward,
+      atr:             sig.atr,
+      session_name:    sig.session_name,
+      htf_trend:       sig.htf_trend,
+      sweep_occurred:  sig.sweep_occurred,
+      mss_occurred:    sig.mss_occurred,
+      displacement:    sig.displacement,
+      reasoning_codes: sig.reasoning_codes,
+      signal_json:     sig.signal_json,
+      ai_narrative:    sig.ai_narrative,
+      invalidation:    sig.invalidation,
+      data_status:     sig.data_status,
+      outcome:         null,
+    }));
+
+    const { error: insertErr } = await sb.from('smc_signals').insert(rows);
+    if (insertErr) {
+      console.error('[auto-analyze] insert error:', insertErr.message);
+    }
+
+    // ── Persist session summary to bot_memory ─────────────────────────────
+    const summary = await generateSessionSummary(results.map(r => ({ ...r })));
+    const actionableSignals = results.filter(r => r.verdict === 'LONG_NOW' || r.verdict === 'SHORT_NOW');
+
+    await sb.from('bot_memory').insert({
+      session_type:      session,
+      signals_found:     results.map(r => ({
+        symbol: r.symbol, verdict: r.verdict, confidence: r.confidence,
+        entry: r.entry_price, sl: r.sl_price, tp1: r.tp1_price,
+      })),
+      trades_placed:     [],
+      market_notes:      summary,
+      lessons_learned:   '',
+      next_watch_levels: Object.fromEntries(
+        actionableSignals.map(s => [s.symbol, { entry: s.entry_price, sl: s.sl_price, tp1: s.tp1_price }])
+      ),
+      signals_saved:     results.length,
+      duration_ms:       Date.now() - started,
+    });
+  }
+
+  return json({
+    ok:         true,
+    dryRun,
+    session,
+    analyzed:   results.length,
+    actionable: results.filter(r => r.verdict === 'LONG_NOW' || r.verdict === 'SHORT_NOW').length,
+    durationMs: Date.now() - started,
+    errors:     errors.length,
+    signals:    results.map(r => ({
+      symbol:     r.symbol,
+      verdict:    r.verdict,
+      confidence: r.confidence,
+      direction:  r.direction,
+      entry:      r.entry_price,
+      sl:         r.sl_price,
+      htf_trend:  r.htf_trend,
+      sweep:      r.sweep_occurred,
+      mss:        r.mss_occurred,
+    })),
+  });
+});
