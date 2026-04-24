@@ -243,6 +243,60 @@
       .pp-heatmap-day .hm-val  { font-size: 8px !important; }
     }
 
+    /* ── Auth Screen ── */
+    .pp-auth-root {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 24px; position: relative; z-index: 1;
+    }
+    .pp-auth-card {
+      width: 100%; max-width: 420px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 24px;
+      backdrop-filter: blur(32px) saturate(180%);
+      -webkit-backdrop-filter: blur(32px) saturate(180%);
+      box-shadow: 0 32px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.15);
+      padding: 40px;
+      animation: pp-rise 0.4s ease both;
+    }
+    .pp-auth-logo { display:flex; align-items:center; gap:12px; margin-bottom:32px; }
+    .pp-auth-logo-mark {
+      width:44px; height:44px; border-radius:14px;
+      background: linear-gradient(135deg, #6366f1, #3b82f6);
+      display:grid; place-items:center; font-size:22px; font-weight:900; color:#fff;
+      box-shadow: 0 0 28px rgba(99,102,241,0.5);
+    }
+    .pp-auth-logo-text { font-size:1.3rem; font-weight:800; letter-spacing:-0.5px; }
+    .pp-auth-logo-text span { color:#6366f1; }
+    .pp-auth-title { font-size:1.5rem; font-weight:800; letter-spacing:-0.5px; margin-bottom:6px; }
+    .pp-auth-sub { color:#94a3b8; font-size:0.875rem; margin-bottom:28px; }
+    .pp-auth-field { margin-bottom:16px; }
+    .pp-auth-label { display:block; font-size:0.78rem; font-weight:700; color:#94a3b8; margin-bottom:6px; letter-spacing:0.3px; }
+    .pp-auth-input {
+      width:100%; padding:12px 14px; border-radius:10px;
+      background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
+      color:#f1f5f9; font-size:0.9rem; font-family:inherit;
+      outline:none; transition:all 0.2s;
+    }
+    .pp-auth-input:focus { border-color:rgba(99,102,241,0.6); box-shadow:0 0 0 3px rgba(99,102,241,0.15); background:rgba(255,255,255,0.08); }
+    .pp-auth-input::placeholder { color:#4b5a72; }
+    .pp-auth-btn {
+      width:100%; padding:13px; border-radius:11px; border:none; cursor:pointer;
+      font-size:0.95rem; font-weight:700; font-family:inherit; margin-top:8px;
+      background: linear-gradient(135deg,#6366f1,#3b82f6);
+      color:#fff; box-shadow:0 4px 20px rgba(99,102,241,0.4);
+      transition:all 0.25s;
+    }
+    .pp-auth-btn:hover:not(:disabled) { transform:translateY(-1px); box-shadow:0 8px 28px rgba(99,102,241,0.6); }
+    .pp-auth-btn:disabled { opacity:0.6; cursor:not-allowed; transform:none; }
+    .pp-auth-switch { text-align:center; margin-top:20px; font-size:0.85rem; color:#64748b; }
+    .pp-auth-switch a { color:#6366f1; font-weight:600; cursor:pointer; text-decoration:none; }
+    .pp-auth-switch a:hover { color:#818cf8; }
+    .pp-auth-error { background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 14px; font-size:0.82rem; color:#fca5a5; margin-bottom:16px; }
+    .pp-auth-divider { display:flex; align-items:center; gap:12px; margin:20px 0; }
+    .pp-auth-divider::before,.pp-auth-divider::after { content:''; flex:1; height:1px; background:rgba(255,255,255,0.08); }
+    .pp-auth-divider span { font-size:0.75rem; color:#4b5a72; font-weight:600; }
+
     /* ── Dot grid texture (glass needs something to blur) ── */
     body::after {
       content: '';
@@ -4438,15 +4492,15 @@ function SettingsWorkbench({ data, accountView, onUpdateAccount }) {
   );
 }
 
-function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup, gateData, onNotif, notifPerm }) {
+function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup, gateData, onNotif, notifPerm, user, onLogout }) {
   const titles = {
-    dashboard: ['Dashboard', 'Live operator overview'],
-    signals:   ['Signals',   'SmartChart + Signal Engine'],
-    analytics: ['Analytics', 'Outcome tracking'],
-    challenge: ['Challenge', 'Prop rules & buffers'],
-    settings:  ['Settings',  'Account & risk profile'],
+    dashboard: ['Overview',   'Live trading dashboard'],
+    signals:   ['Signals',    'AI analysis engine'],
+    analytics: ['Analytics',  'Performance & outcomes'],
+    challenge: ['Challenge',  'Prop firm progress'],
+    settings:  ['Settings',   'Account & preferences'],
   };
-  const [title] = titles[screen] || titles.dashboard;
+  const [title, subtitle] = titles[screen] || titles.dashboard;
 
   // Phase 1 gate metrics
   const totalTrades = gateData?.totalTrades || 0;
@@ -4464,8 +4518,25 @@ function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, las
           <div className="pp-brand-mark">P</div>
           <div>
             <div style={{ fontWeight:900, fontSize:16, letterSpacing:'-.03em' }}>PropPilot <span style={{ color:T.indigo }}>AI</span></div>
-            <div style={{ color:T.sub, fontSize:11 }}>{title}</div>
+            <div style={{ color:T.sub, fontSize:11 }}>{title} &mdash; {subtitle}</div>
           </div>
+        </div>
+
+        {/* Phase selector pills */}
+        <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+          {Object.entries(PHASES).map(([id, p]) => (
+            <button
+              key={id}
+              onClick={() => onPhaseChange?.(id)}
+              style={{
+                padding:'4px 10px', border:'none', borderRadius:7, cursor:'pointer', fontWeight:700,
+                fontSize:10, letterSpacing:'.04em', transition:'all .15s',
+                background: phase === id ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)',
+                color: phase === id ? '#a5b4fc' : T.muted,
+                border: `1px solid ${phase === id ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.07)'}`,
+              }}
+            >{p.tag}</button>
+          ))}
         </div>
 
         {/* Phase Gate — always visible */}
@@ -4499,8 +4570,18 @@ function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, las
               {notifPerm === 'granted' ? '🔔' : '🔕'}
             </button>
           )}
-          <button className="pp-btn" onClick={() => onRefresh('updating')}>↻</button>
+          <button className="pp-btn" onClick={() => onRefresh('updating')} title="Refresh data">↻</button>
           <button className="pp-btn pp-btn-primary" onClick={onSetup}>Account</button>
+          {onLogout && (
+            <button
+              className="pp-btn"
+              onClick={onLogout}
+              title={user?.email ? `Sign out (${user.email})` : 'Sign out'}
+              style={{ padding:'8px 10px', fontSize:15 }}
+            >
+              ⎋
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -4508,18 +4589,173 @@ function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, las
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// AUTH SCREEN
+// ═══════════════════════════════════════════════════════════════════════════
+
+function AuthScreen({ onAuth }) {
+  const [mode,     setMode]     = useState('login'); // 'login' | 'register'
+  const [email,    setEmail]    = useState('');
+  const [password, setPassword] = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState('');
+
+  const handle = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || !password.trim()) { setError('Please fill in all fields.'); return; }
+    if (!sbClient) { setError('Auth service unavailable.'); return; }
+    setLoading(true); setError('');
+    try {
+      let res;
+      if (mode === 'login') {
+        res = await sbClient.auth.signInWithPassword({ email: email.trim(), password });
+      } else {
+        res = await sbClient.auth.signUp({ email: email.trim(), password });
+      }
+      if (res.error) throw res.error;
+      if (mode === 'register' && !res.data?.session) {
+        setError(''); setMode('confirm');
+      } else {
+        onAuth(res.data.session || res.data.user);
+      }
+    } catch(err) {
+      setError(err.message || 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (mode === 'confirm') {
+    return (
+      <div className="pp-auth-root">
+        <div className="pp-auth-card" style={{ textAlign:'center' }}>
+          <div style={{ fontSize:48, marginBottom:20 }}>✉️</div>
+          <div style={{ fontSize:'1.3rem', fontWeight:800, marginBottom:10 }}>Check your email</div>
+          <div style={{ color:'#94a3b8', fontSize:'0.9rem', marginBottom:24 }}>
+            We sent a confirmation link to <strong style={{ color:'#f1f5f9' }}>{email}</strong>.
+            Click it to activate your account, then come back and sign in.
+          </div>
+          <button className="pp-auth-btn" onClick={() => setMode('login')}>Back to Sign In</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pp-auth-root">
+      <div className="pp-auth-card">
+        <div className="pp-auth-logo">
+          <div className="pp-auth-logo-mark">P</div>
+          <div className="pp-auth-logo-text">Prop<span>Pilot</span> <span style={{ fontWeight:400, fontSize:'0.9rem', color:'#6366f1' }}>AI</span></div>
+        </div>
+
+        <div className="pp-auth-title">{mode === 'login' ? 'Welcome back' : 'Create your account'}</div>
+        <div className="pp-auth-sub">
+          {mode === 'login'
+            ? 'Sign in to access your prop trading dashboard.'
+            : 'Start trading smarter in under 60 seconds.'}
+        </div>
+
+        {error && <div className="pp-auth-error">{error}</div>}
+
+        <form onSubmit={handle}>
+          <div className="pp-auth-field">
+            <label className="pp-auth-label">Email address</label>
+            <input
+              className="pp-auth-input"
+              type="email" placeholder="trader@example.com"
+              value={email} onChange={e => setEmail(e.target.value)}
+              autoComplete="email" autoFocus
+            />
+          </div>
+          <div className="pp-auth-field">
+            <label className="pp-auth-label">Password</label>
+            <input
+              className="pp-auth-input"
+              type="password" placeholder="••••••••"
+              value={password} onChange={e => setPassword(e.target.value)}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            />
+          </div>
+          <button className="pp-auth-btn" type="submit" disabled={loading}>
+            {loading ? 'Please wait…' : mode === 'login' ? 'Sign In →' : 'Create Account →'}
+          </button>
+        </form>
+
+        <div className="pp-auth-divider"><span>or</span></div>
+
+        <div className="pp-auth-switch">
+          {mode === 'login'
+            ? <>Don't have an account? <a onClick={() => { setMode('register'); setError(''); }}>Sign up free</a></>
+            : <>Already have an account? <a onClick={() => { setMode('login'); setError(''); }}>Sign in</a></>
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuthGate({ children }) {
+  const [authState, setAuthState] = useState('loading'); // 'loading' | 'authed' | 'unauthed'
+  const [user,      setUser]      = useState(null);
+
+  useEffect(() => {
+    if (!sbClient) { setAuthState('unauthed'); return; }
+    // Check current session
+    sbClient.auth.getSession().then(({ data }) => {
+      if (data?.session) {
+        setUser(data.session.user);
+        setAuthState('authed');
+      } else {
+        setAuthState('unauthed');
+      }
+    });
+    // Listen for auth changes
+    const { data: listener } = sbClient.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setUser(session.user);
+        setAuthState('authed');
+      } else {
+        setUser(null);
+        setAuthState('unauthed');
+      }
+    });
+    return () => listener?.subscription?.unsubscribe?.();
+  }, []);
+
+  const handleLogout = async () => {
+    if (!sbClient) return;
+    await sbClient.auth.signOut();
+  };
+
+  if (authState === 'loading') {
+    return (
+      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', flexDirection:'column', gap:16 }}>
+        <div style={{ width:40, height:40, border:'3px solid rgba(99,102,241,0.3)', borderTopColor:'#6366f1', borderRadius:'50%', animation:'pp-spin 0.7s linear infinite' }}/>
+        <div style={{ color:'#64748b', fontSize:'0.85rem' }}>Loading PropPilot…</div>
+      </div>
+    );
+  }
+
+  if (authState === 'unauthed') {
+    return <AuthScreen onAuth={() => setAuthState('authed')}/>;
+  }
+
+  return children({ user, onLogout: handleLogout });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // APP SHELL
 // ═══════════════════════════════════════════════════════════════════════════
 
 const TABS = [
-  { id:'dashboard', label:'Dashboard', icon:'📊' },
+  { id:'dashboard', label:'Overview',  icon:'◈'  },
   { id:'signals',   label:'Signals',   icon:'⚡' },
-  { id:'analytics', label:'Analytics', icon:'📈' },
-  { id:'challenge', label:'Challenge', icon:'🎯' },
-  { id:'settings',  label:'Settings',  icon:'⚙️' },
+  { id:'analytics', label:'Analytics', icon:'▲'  },
+  { id:'challenge', label:'Challenge', icon:'◎'  },
+  { id:'settings',  label:'Settings',  icon:'◉'  },
 ];
 
-function PropPilotAI({ pushMgr }) {
+function PropPilotAI({ pushMgr, user, onLogout }) {
   const hashScreen = useCallback(() => {
     const raw = window.location.hash.replace('#', '');
     return TABS.some(t => t.id === raw) ? raw : null;
@@ -4599,6 +4835,7 @@ function PropPilotAI({ pushMgr }) {
       <UnifiedAppHeader
         screen={screen}
         phase={phase}
+        onPhaseChange={setPhase}
         accountView={accountView}
         syncState={appData.syncState}
         rtStatus={appData.rtStatus}
@@ -4607,6 +4844,8 @@ function PropPilotAI({ pushMgr }) {
         onSetup={() => setShowSetup(true)}
         gateData={gateData}
         notifPerm={notifPerm}
+        user={user}
+        onLogout={onLogout}
         onNotif={async () => {
           const p = await pushMgr?.requestPermission();
           setNotifPerm(p || 'unsupported');
@@ -4615,20 +4854,6 @@ function PropPilotAI({ pushMgr }) {
       />
 
       <div className="pp-content">
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:20 }}>
-          {Object.entries(PHASES).map(([id, p]) => (
-            <button
-              key={id}
-              className={`pp-btn ${phase === id ? 'pp-btn-primary' : ''}`}
-              onClick={() => setPhase(id)}
-            >
-              {p.tag} · {p.label}
-            </button>
-          ))}
-          <a href="analytics.html" className="pp-btn" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center' }}>Open standalone analytics</a>
-          <a href="signal.html" className="pp-btn" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center' }}>Open standalone signal engine</a>
-        </div>
-
         {appData.loading ? (
           <div className="pp-grid pp-grid-4x">
             {Array.from({ length: 8 }, (_, i) => <div key={i} className="pp-skeleton" style={{ height: i < 4 ? 120 : 260 }}/>)}
@@ -4647,7 +4872,7 @@ function PropPilotAI({ pushMgr }) {
       <nav className="pp-bottom-nav" aria-label="Primary">
         {TABS.map(tab => (
           <button key={tab.id} className={`pp-nav-item ${screen === tab.id ? 'active' : ''}`} onClick={() => setScreen(tab.id)}>
-            <span className="pp-nav-icon">{tab.icon}</span>
+            <span className="pp-nav-icon" style={{ fontFamily:'system-ui', fontSize:16 }}>{tab.icon}</span>
             <span className="pp-nav-label">{tab.label}</span>
           </button>
         ))}
@@ -4774,7 +4999,11 @@ class ErrorBoundary extends React.Component {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <ErrorBoundary>
     <ToastProvider>
-      <PropPilotAI pushMgr={PushMgr}/>
+      <AuthGate>
+        {({ user, onLogout }) => (
+          <PropPilotAI pushMgr={PushMgr} user={user} onLogout={onLogout}/>
+        )}
+      </AuthGate>
     </ToastProvider>
   </ErrorBoundary>
 );
