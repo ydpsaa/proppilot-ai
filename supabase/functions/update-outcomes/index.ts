@@ -456,6 +456,28 @@ Deno.serve(async (req) => {
           pnl_r: outcome.pnlR,
           price: outcome.price,
         });
+
+        // ── Telegram push for TP/SL outcomes (fire-and-forget) ─────────────
+        if (!dryRun && outcome.outcome !== 'EXPIRED') {
+          fetch(`${SB_URL}/functions/v1/telegram-bot`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SB_SERVICE_KEY}`,
+            },
+            body: JSON.stringify({
+              mode: 'outcome',
+              signal: {
+                symbol:    signal.symbol,
+                outcome:   outcome.outcome,
+                direction: signal.direction,
+                pnl_r:     outcome.pnlR,
+                pnl_usd:   signal.risk_usd != null && outcome.pnlR != null
+                             ? signal.risk_usd * outcome.pnlR : null,
+              },
+            }),
+          }).catch(e => console.warn('[telegram-push] failed:', e.message));
+        }
       } catch (err) {
         errors++;
         const message = err instanceof Error ? err.message : String(err);

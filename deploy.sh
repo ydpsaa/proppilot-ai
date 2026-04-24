@@ -66,6 +66,21 @@ else
   echo "    supabase secrets set GROQ_API_KEY=<your_key>"
 fi
 
+# Set Telegram secrets if provided
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+  supabase secrets set TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
+  echo "  ✓ TELEGRAM_BOT_TOKEN set"
+else
+  echo "  ⚠ TELEGRAM_BOT_TOKEN not set. To enable Telegram push:"
+  echo "    1. Message @BotFather on Telegram → /newbot"
+  echo "    2. supabase secrets set TELEGRAM_BOT_TOKEN=<token>"
+  echo "    3. supabase secrets set TELEGRAM_CHAT_ID=<your_chat_id>"
+fi
+if [ -n "$TELEGRAM_CHAT_ID" ]; then
+  supabase secrets set TELEGRAM_CHAT_ID="$TELEGRAM_CHAT_ID"
+  echo "  ✓ TELEGRAM_CHAT_ID set"
+fi
+
 # ── Step 6: Deploy Edge Functions ─────────────────────────────────────────────
 echo ""
 echo "▶ 6/6  Deploying Edge Functions..."
@@ -76,6 +91,7 @@ FUNCTIONS=(
   "update-strategy-stats"
   "update-paper-positions"
   "execute-paper-trade"
+  "telegram-bot"
 )
 
 for fn in "${FUNCTIONS[@]}"; do
@@ -98,4 +114,13 @@ echo ""
 echo "Then test Edge Functions:"
 echo "  curl https://$PROJECT_REF.supabase.co/functions/v1/auto-analyze"
 echo "  curl https://$PROJECT_REF.supabase.co/functions/v1/update-outcomes"
+echo ""
+echo "TELEGRAM BOT SETUP (push notifications):"
+echo "  1. Open @BotFather on Telegram → /newbot → copy token"
+echo "  2. supabase secrets set TELEGRAM_BOT_TOKEN=<token>"
+echo "  3. Send your bot a message → /start → check logs for chat_id:"
+echo "     supabase functions logs telegram-bot --tail"
+echo "  4. supabase secrets set TELEGRAM_CHAT_ID=<chat_id>"
+echo "  5. Register webhook:"
+echo "     curl 'https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://$PROJECT_REF.supabase.co/functions/v1/telegram-bot'"
 echo ""

@@ -23,12 +23,21 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { height: 100%; }
     body {
-      background: #060710;
+      background: #05070f;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 20% 0%, rgba(59,130,246,0.28) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(139,92,246,0.22) 0%, transparent 60%);
       color: #E2E8F0;
       font-family: 'Inter', system-ui, sans-serif;
       -webkit-font-smoothing: antialiased;
       font-size: 14px;
     }
+    body::after {
+      content: ''; position: fixed; inset: 0;
+      background-image: radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px);
+      background-size: 28px 28px; pointer-events: none; z-index: 0;
+    }
+    #root { position: relative; z-index: 1; }
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
@@ -70,12 +79,12 @@ const SB_HDR = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Typ
 
 // ── Color palette ──────────────────────────────────────────────────────────────
 const C = {
-  bg0:     '#060710',
-  bg1:     '#0C0F1E',
-  bg2:     '#111428',
-  card:    '#0F1220',
-  border:  'rgba(255,255,255,0.07)',
-  border2: 'rgba(255,255,255,0.12)',
+  bg0:     '#05070f',
+  bg1:     'rgba(255,255,255,0.04)',
+  bg2:     'rgba(255,255,255,0.07)',
+  card:    'rgba(255,255,255,0.07)',
+  border:  'rgba(255,255,255,0.10)',
+  border2: 'rgba(255,255,255,0.16)',
   amber:   '#F5A623',
   amberD:  '#D4891E',
   green:   '#22C55E',
@@ -522,10 +531,13 @@ function App() {
 
   // ── UI helpers ────────────────────────────────────────────────────────────
   const card = {
-    background: C.card,
-    border:     `1px solid ${C.border}`,
+    background: 'rgba(255,255,255,0.07)',
+    border:     '1px solid rgba(255,255,255,0.12)',
     borderRadius: 14,
     padding:    '18px 20px',
+    backdropFilter: 'blur(24px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(24px) saturate(160%)',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.14)',
   };
 
   const priceColor = lastPrice != null && prevPrice != null
@@ -539,22 +551,26 @@ function App() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100vh', background:C.bg0 }}>
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh' }}>
 
       {/* ── Top Bar ── */}
-      <div style={{ borderBottom:`1px solid ${C.border}`, background:C.bg1, flexShrink:0, zIndex:10 }}>
+      <div style={{ borderBottom:`1px solid rgba(255,255,255,0.08)`, background:'rgba(5,7,15,0.75)', backdropFilter:'blur(24px) saturate(160%)', WebkitBackdropFilter:'blur(24px) saturate(160%)', flexShrink:0, zIndex:10 }}>
         <div style={{ maxWidth:1600, margin:'0 auto', padding:'0 20px', height:56,
           display:'flex', alignItems:'center', justifyContent:'space-between', gap:16 }}>
 
-          {/* Logo */}
+          {/* Logo + Nav */}
           <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
             <div style={{ width:32, height:32, borderRadius:8,
-              background:`linear-gradient(135deg, ${C.amber}, ${C.amberD})`,
-              display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>⚡</div>
+              background:'linear-gradient(135deg, #3B82F6, #14B8A6)',
+              display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:900, color:'#fff' }}>P</div>
             <div>
               <div style={{ fontWeight:800, fontSize:15, color:C.text }}>PropPilot AI</div>
-              <div style={{ fontSize:9, color:C.muted, letterSpacing:'0.1em', textTransform:'uppercase' }}>SMC Engine v2</div>
+              <div style={{ fontSize:9, color:C.muted, letterSpacing:'0.1em', textTransform:'uppercase' }}>SMC Live Engine</div>
             </div>
+            <div style={{ width:1, height:28, background:'rgba(255,255,255,0.1)', margin:'0 4px' }}/>
+            {[{href:'index.html',label:'Dashboard'},{href:'signal.html',label:'Signals'},{href:'analytics.html',label:'Analytics'},{href:'bot.html',label:'Bot'},{href:'roadmap.html',label:'Roadmap'}].map(({href,label})=>(
+              <a key={href} href={href} style={{color:C.sub,fontSize:11,textDecoration:'none',padding:'4px 10px',borderRadius:7,background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.10)'}}>{label}</a>
+            ))}
           </div>
 
           {/* Symbol pills */}

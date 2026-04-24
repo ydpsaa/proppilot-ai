@@ -4,6 +4,12 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>PropPilot AI — Prop Trading OS</title>
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="theme-color" content="#3B82F6"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="PropPilot AI"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
   <!-- React 18 -->
@@ -3160,6 +3166,304 @@ function DayHeatmap({ signals }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SIGNAL JOURNAL — per-signal notes in localStorage
+// ═══════════════════════════════════════════════════════════════════════════
+function SignalNote({ signalId }) {
+  const [open, setOpen]   = useState(false);
+  const [text, setText]   = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const key = `pp_note_${signalId}`;
+
+  // Load on mount
+  useEffect(() => {
+    try { setText(localStorage.getItem(key) || ''); } catch {}
+  }, [signalId]);
+
+  const save = () => {
+    try {
+      if (text.trim()) localStorage.setItem(key, text);
+      else localStorage.removeItem(key);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1800);
+    } catch {}
+  };
+
+  const hasNote = text.trim().length > 0;
+
+  return (
+    <div style={{ marginTop:6 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background: hasNote ? 'rgba(245,158,11,0.1)' : 'rgba(255,255,255,0.04)',
+          border: `1px solid ${hasNote ? 'rgba(245,158,11,0.3)' : 'rgba(255,255,255,0.1)'}`,
+          borderRadius:8, padding:'3px 10px',
+          color: hasNote ? '#F59E0B' : '#64748B',
+          fontSize:11, cursor:'pointer', fontWeight:600,
+          display:'flex', alignItems:'center', gap:5,
+        }}
+      >
+        <span style={{ fontSize:11 }}>📝</span>
+        {open ? 'Close note' : (hasNote ? 'View note' : 'Add note')}
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop:6, padding:'10px 12px',
+          background:'rgba(245,158,11,0.05)',
+          border:'1px solid rgba(245,158,11,0.18)',
+          borderRadius:10,
+        }}>
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="Your thoughts, observations, lesson learned…"
+            rows={3}
+            style={{
+              width:'100%', resize:'vertical', boxSizing:'border-box',
+              background:'rgba(255,255,255,0.04)',
+              border:'1px solid rgba(255,255,255,0.1)',
+              borderRadius:8, padding:'8px 10px',
+              color:'#F1F5F9', fontSize:12, fontFamily:'inherit',
+              outline:'none',
+            }}
+          />
+          <div style={{ display:'flex', justifyContent:'flex-end', marginTop:6 }}>
+            <button
+              onClick={save}
+              style={{
+                padding:'4px 14px', borderRadius:8, fontSize:11, fontWeight:700, cursor:'pointer',
+                background: saved ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.15)',
+                border: `1px solid ${saved ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.35)'}`,
+                color: saved ? '#10B981' : '#F59E0B',
+                transition:'all 0.2s',
+              }}
+            >
+              {saved ? '✓ Saved' : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POSITION SIZING CALCULATOR
+// ═══════════════════════════════════════════════════════════════════════════
+function PosSizer({ symbol = '', entry = 0, sl = 0, tp1 = 0, tp2 = 0, accountBalance = 100000 }) {
+  const [open,    setOpen]    = useState(false);
+  const [riskPct, setRiskPct] = useState(1);
+
+  const slDist = Math.abs(entry - sl);
+  if (!entry || !sl || slDist === 0) return null;
+
+  // Detect instrument type to calculate lot/unit size
+  const sym = (symbol || '').toUpperCase();
+  let contractSize, pipSize, pipLabel;
+  if (sym.includes('XAU') || sym.includes('GOLD')) {
+    contractSize = 100;   // 100 oz per standard lot
+    pipSize      = 0.01;  // $0.01 gold price = 1 pip
+    pipLabel     = 'lots';
+  } else if (sym.includes('NAS') || sym.includes('NDX') || sym.includes('US30') || sym.includes('SPX') || sym.includes('DAX')) {
+    contractSize = 1;     // 1 contract = 1 index unit
+    pipSize      = 1;     // 1 point = 1 pip
+    pipLabel     = 'contracts';
+  } else if (sym.length === 6 && /^[A-Z]+$/.test(sym)) {
+    // Forex pair
+    contractSize = 100000; // standard lot
+    pipSize      = sym.endsWith('JPY') ? 0.01 : 0.0001;
+    pipLabel     = 'lots';
+  } else {
+    contractSize = 1;
+    pipSize      = 1;
+    pipLabel     = 'units';
+  }
+
+  const riskUsd   = accountBalance * (riskPct / 100);
+  const slPips    = slDist / pipSize;
+  const pipValue  = contractSize * pipSize;                    // $ per pip per 1 lot
+  const lotSize   = riskUsd / (slPips * pipValue);
+  const rrRatio1  = tp1 ? (Math.abs(tp1 - entry) / slDist) : null;
+  const rrRatio2  = tp2 ? (Math.abs(tp2 - entry) / slDist) : null;
+
+  return (
+    <div style={{ marginTop:8 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background:'rgba(59,130,246,0.1)', border:'1px solid rgba(59,130,246,0.25)',
+          borderRadius:8, padding:'3px 10px', color:'#60A5FA', fontSize:11,
+          cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', gap:5,
+        }}
+      >
+        <span style={{ fontSize:12 }}>📐</span>
+        {open ? 'Hide sizer' : 'Position size'}
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop:8, padding:'12px 14px',
+          background:'rgba(59,130,246,0.06)', border:'1px solid rgba(59,130,246,0.18)',
+          borderRadius:10,
+        }}>
+          {/* Risk % slider */}
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+            <label style={{ color:'#94A3B8', fontSize:11, whiteSpace:'nowrap' }}>Risk</label>
+            <input
+              type="range" min="0.25" max="3" step="0.25"
+              value={riskPct}
+              onChange={e => setRiskPct(Number(e.target.value))}
+              style={{ flex:1, accentColor:'#3B82F6', cursor:'pointer' }}
+            />
+            <span style={{ color:'#F1F5F9', fontWeight:900, fontSize:13, minWidth:36, textAlign:'right' }}>
+              {riskPct}%
+            </span>
+          </div>
+
+          {/* Results grid */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+            {[
+              { label:'Risk $',   val:`$${riskUsd.toLocaleString('en',{maximumFractionDigits:0})}`, color:'#EF4444' },
+              { label:'SL pips',  val:slPips.toFixed(1),                                            color:'#94A3B8' },
+              { label:pipLabel,   val:lotSize < 0.001 ? '<0.001' : lotSize.toFixed(3),              color:'#F1F5F9' },
+              { label:'pip val',  val:`$${pipValue.toFixed(2)}/lot`,                                color:'#94A3B8' },
+            ].map(({ label, val, color }) => (
+              <div key={label} style={{
+                background:'rgba(255,255,255,0.04)', borderRadius:8, padding:'6px 10px',
+              }}>
+                <div style={{ color:'#64748B', fontSize:10, marginBottom:2 }}>{label}</div>
+                <div style={{ color, fontSize:13, fontWeight:900 }}>{val}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* R:R ratios */}
+          {(rrRatio1 || rrRatio2) && (
+            <div style={{ display:'flex', gap:10, marginTop:8, fontSize:12 }}>
+              {rrRatio1 && (
+                <span style={{ color:'#94A3B8' }}>
+                  TP1 R:R <strong style={{ color:rrRatio1 >= 2 ? '#10B981' : rrRatio1 >= 1.5 ? '#F59E0B' : '#EF4444' }}>
+                    1:{rrRatio1.toFixed(1)}
+                  </strong>
+                </span>
+              )}
+              {rrRatio2 && (
+                <span style={{ color:'#94A3B8' }}>
+                  TP2 R:R <strong style={{ color:rrRatio2 >= 3 ? '#10B981' : rrRatio2 >= 2 ? '#F59E0B' : '#EF4444' }}>
+                    1:{rrRatio2.toFixed(1)}
+                  </strong>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE PRICE TICKER
+// ═══════════════════════════════════════════════════════════════════════════
+function LivePriceTicker() {
+  const PAIRS = [
+    { sym:'XAU/USD', label:'Gold',      flag:'🥇' },
+    { sym:'EUR/USD', label:'EUR/USD',   flag:'🇪🇺' },
+    { sym:'GBP/USD', label:'GBP/USD',   flag:'🇬🇧' },
+    { sym:'GBP/JPY', label:'GBP/JPY',   flag:'🔵' },
+    { sym:'NAS100',  label:'NAS100',    flag:'📊' },
+  ];
+  const [prices, setPrices]   = useState({});
+  const [prev,   setPrev]     = useState({});
+  const [ts,     setTs]       = useState(null);
+  const [err,    setErr]      = useState(false);
+
+  const fetchPrices = useCallback(async () => {
+    try {
+      const syms = PAIRS.map(p => encodeURIComponent(p.sym)).join(',');
+      const r = await fetch(
+        `https://api.twelvedata.com/price?symbol=${syms}&apikey=${TD_KEY}`
+      );
+      const json = await r.json();
+      setPrev(prev => ({ ...prev, ...prices }));
+      const next = {};
+      PAIRS.forEach(p => {
+        const raw = json[p.sym]?.price ?? json[p.sym];
+        if (raw) next[p.sym] = parseFloat(raw);
+      });
+      if (Object.keys(next).length) {
+        setPrices(next);
+        setTs(new Date());
+        setErr(false);
+      }
+    } catch {
+      setErr(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPrices();
+    const id = setInterval(fetchPrices, 60000);
+    return () => clearInterval(id);
+  }, [fetchPrices]);
+
+  return (
+    <div style={{
+      display:'flex', gap: 0, overflowX:'auto',
+      background:'rgba(255,255,255,0.03)',
+      border:'1px solid rgba(255,255,255,0.07)',
+      borderRadius: 12,
+    }}>
+      {PAIRS.map((p, i) => {
+        const cur  = prices[p.sym];
+        const prv  = prev[p.sym];
+        const up   = cur != null && prv != null && cur > prv;
+        const down = cur != null && prv != null && cur < prv;
+        const col  = up ? '#34D399' : down ? '#F87171' : '#94A3B8';
+        const arrow = up ? '▲' : down ? '▼' : '–';
+        const change = (cur != null && prv != null) ? ((cur - prv) / prv * 100) : null;
+
+        return (
+          <div key={p.sym} style={{
+            flex:'0 0 auto', minWidth: 140,
+            padding:'11px 18px',
+            borderRight: i < PAIRS.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+            display:'flex', flexDirection:'column', gap: 3,
+          }}>
+            <div style={{ display:'flex', alignItems:'center', gap: 6 }}>
+              <span style={{ fontSize: 13 }}>{p.flag}</span>
+              <span style={{ color:'#94A3B8', fontSize: 10, fontWeight: 800, letterSpacing:'.05em' }}>{p.label}</span>
+            </div>
+            <div style={{ fontFamily:'monospace', fontSize: 15, fontWeight: 900, color: cur ? col : '#475569' }}>
+              {cur ? fmtPrice(p.sym, cur) : '—'}
+            </div>
+            {change != null && (
+              <div style={{ fontSize: 10, fontWeight: 700, color: col }}>
+                {arrow} {Math.abs(change).toFixed(4)}%
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div style={{
+        marginLeft:'auto', padding:'11px 16px',
+        display:'flex', flexDirection:'column', justifyContent:'center', gap: 3,
+        borderLeft:'1px solid rgba(255,255,255,0.06)',
+        flexShrink: 0,
+      }}>
+        <div style={{ fontSize: 9, color:'#475569', fontWeight: 700, letterSpacing:'.06em' }}>LIVE · 60s</div>
+        <div style={{ fontSize: 9, color:'#475569' }}>
+          {ts ? ts.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '—'}
+        </div>
+        {err && <div style={{ fontSize: 9, color:'#F87171' }}>fetch error</div>}
+      </div>
+    </div>
+  );
+}
+
 function ExecutiveDashboard({ data, phase }) {
   const { show: showToast } = useToast();
   const account       = data.account || {};
@@ -3243,6 +3547,9 @@ function ExecutiveDashboard({ data, phase }) {
 
   return (
     <div className="pp-grid" style={{ gap:20 }}>
+
+      {/* ── LIVE PRICE TICKER ── */}
+      <LivePriceTicker/>
 
       {/* ── HERO ROW ── */}
       <div className="pp-panel" style={{ padding:28, background:'rgba(255,255,255,0.06)' }}>
@@ -3390,6 +3697,10 @@ function ExecutiveDashboard({ data, phase }) {
                         {signal.sl    && <span style={{ color:T.sub }}>SL <strong style={{ color:T.red }}>{fmtPrice(signal.symbol, signal.sl)}</strong></span>}
                       </div>
                       <TpSlBar entry={signal.price} tp1={signal.tp1} tp2={signal.tp2} sl={signal.sl} direction={signal.direction}/>
+                      <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                        <PosSizer symbol={signal.symbol} entry={safeNum(signal.price)} sl={safeNum(signal.sl)} tp1={safeNum(signal.tp1)} tp2={safeNum(signal.tp2)} accountBalance={balance}/>
+                        <SignalNote signalId={signal.id}/>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3590,22 +3901,287 @@ function OutcomeAnalyticsPanel({ data }) {
 }
 
 function SignalsWorkspace() {
-  const [loaded, setLoaded] = useState(false);
+  const SYMS      = ['XAU/USD','EUR/USD','GBP/USD','NAS100','GBP/JPY'];
+  const TFS       = [{ v:'15min', l:'15m' }, { v:'1h', l:'1h' }, { v:'4h', l:'4h' }];
+  const DIRS      = ['AUTO','LONG','SHORT'];
+
+  const [sym,    setSym]    = useState('XAU/USD');
+  const [tf,     setTf]     = useState('1h');
+  const [dir,    setDir]    = useState('AUTO');
+  const [result, setResult] = useState(null);
+  const [candles, setCandles] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error,  setError]  = useState(null);
+
+  const runAnalysis = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const enc = encodeURIComponent(sym);
+      const r = await fetch(
+        `https://api.twelvedata.com/time_series?symbol=${enc}&interval=${tf}&outputsize=200&apikey=${TD_KEY}`
+      );
+      const json = await r.json();
+      if (!json.values?.length) throw new Error(json.message || 'No data returned');
+
+      // Convert TwelveData → candle format
+      const cvt = json.values.slice().reverse().map(v => ({
+        v: parseFloat(v.close),
+        h: parseFloat(v.high),
+        l: parseFloat(v.low),
+        o: parseFloat(v.open),
+        t: v.datetime,
+      }));
+      setCandles(cvt);
+
+      const closes     = cvt.map(c => c.v);
+      const price      = closes[closes.length - 1];
+      const ema20val   = _ema(closes, 20);
+      const ema50val   = _ema(closes, 50);
+      const autoDir    = ema20val > ema50val ? 'LONG' : 'SHORT';
+      const effectDir  = dir === 'AUTO' ? autoDir : dir;
+
+      // Compute numeric SL/TP levels for display (mirrors _runAnalysis internals)
+      const pip   = sym === 'NAS100' ? 1 : sym === 'XAU/USD' ? 0.1 : 0.0001;
+      const atrVal = _atr(cvt);
+      const slPips  = Math.max(1, Math.round((atrVal / pip) * 1.2));
+      const tp1Pips = Math.round(slPips * 2.0);
+      const tp2Pips = Math.round(slPips * 3.2);
+      const slDist   = slPips  * pip;
+      const tp1Dist  = tp1Pips * pip;
+      const tp2Dist  = tp2Pips * pip;
+      const slNum  = effectDir === 'LONG' ? price - slDist  : price + slDist;
+      const tp1Num = effectDir === 'LONG' ? price + tp1Dist : price - tp1Dist;
+      const tp2Num = effectDir === 'LONG' ? price + tp2Dist : price - tp2Dist;
+
+      const analysis = _runAnalysis({
+        candles: cvt,
+        dir: effectDir,
+        sym,
+        account: { size: 100000, todayPnL: 0 },
+        phase: 'phase1',
+        newsEvents: [],
+      });
+
+      setResult({
+        ...analysis,
+        direction: effectDir,
+        autoDir,
+        price,
+        slNum, tp1Num, tp2Num,
+        tf,
+      });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verdictColor = result
+    ? result.verdict === result.direction ? T.green
+    : result.verdict === 'NO TRADE' ? T.red
+    : T.amber
+    : T.muted;
+
   return (
-    <div className="pp-panel" style={{ padding:0, overflow:'hidden' }}>
-      {!loaded && (
-        <div style={{ padding:20 }}>
-          <div className="pp-skeleton" style={{ height:18, width:220, marginBottom:16 }}/>
-          <div className="pp-skeleton" style={{ height:460, width:'100%' }}/>
+    <div className="pp-grid" style={{ gap: 20 }}>
+
+      {/* ── Controls ── */}
+      <div className="pp-panel" style={{ padding: 20 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 18, flexWrap:'wrap', gap: 8 }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 17 }}>⚡ Signal Engine</div>
+            <div style={{ color: T.sub, fontSize: 12, marginTop: 3 }}>SMC · EMA · RSI · MACD · BB · Live data from TwelveData</div>
+          </div>
+        </div>
+
+        <div style={{ display:'flex', gap: 16, flexWrap:'wrap', alignItems:'flex-end' }}>
+          {/* Symbol */}
+          <div>
+            <div style={{ color: T.muted, fontSize: 10, fontWeight: 800, letterSpacing:'.07em', marginBottom: 7 }}>SYMBOL</div>
+            <div style={{ display:'flex', gap: 5 }}>
+              {SYMS.map(s => (
+                <button key={s} onClick={() => { setSym(s); setResult(null); }}
+                  className={`pp-btn${sym === s ? ' pp-btn-primary' : ''}`}
+                  style={{ fontSize: 11, padding: '6px 9px' }}>{s}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Timeframe */}
+          <div>
+            <div style={{ color: T.muted, fontSize: 10, fontWeight: 800, letterSpacing:'.07em', marginBottom: 7 }}>TIMEFRAME</div>
+            <div style={{ display:'flex', gap: 5 }}>
+              {TFS.map(t => (
+                <button key={t.v} onClick={() => { setTf(t.v); setResult(null); }}
+                  className={`pp-btn${tf === t.v ? ' pp-btn-primary' : ''}`}
+                  style={{ fontSize: 11, padding: '6px 12px' }}>{t.l}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Direction */}
+          <div>
+            <div style={{ color: T.muted, fontSize: 10, fontWeight: 800, letterSpacing:'.07em', marginBottom: 7 }}>DIRECTION</div>
+            <div style={{ display:'flex', gap: 5 }}>
+              {DIRS.map(d => (
+                <button key={d} onClick={() => setDir(d)}
+                  className={`pp-btn${dir === d ? ' pp-btn-primary' : ''}`}
+                  style={{ fontSize: 11, padding: '6px 12px' }}>{d}</button>
+              ))}
+            </div>
+          </div>
+
+          <button onClick={runAnalysis} disabled={loading}
+            className="pp-btn pp-btn-primary"
+            style={{ height: 36, minWidth: 148, fontWeight: 800, fontSize: 13 }}>
+            {loading ? '⏳ Fetching data…' : '⚡ Run Analysis'}
+          </button>
+        </div>
+
+        {error && (
+          <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8,
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+            color: T.red, fontSize: 12 }}>
+            ⚠ {error}
+          </div>
+        )}
+      </div>
+
+      {/* ── Result ── */}
+      {result && (
+        <div className="pp-panel" style={{ padding: 22 }}>
+
+          {/* Header row */}
+          <div style={{ display:'flex', gap: 20, alignItems:'flex-start', flexWrap:'wrap', marginBottom: 18 }}>
+
+            {/* Conf ring + verdict */}
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap: 8 }}>
+              <ConfRing score={result.confidence} size={80}/>
+              <div style={{ fontWeight: 900, fontSize: 12, letterSpacing:'.05em', color: verdictColor }}>
+                {result.verdict}
+              </div>
+              <div style={{ fontSize: 10, color: T.muted }}>confidence</div>
+            </div>
+
+            {/* Symbol + price + direction */}
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ display:'flex', alignItems:'center', gap: 10, marginBottom: 6, flexWrap:'wrap' }}>
+                <div style={{ fontWeight: 900, fontSize: 22, letterSpacing:'-.02em' }}>{sym}</div>
+                <div style={{
+                  fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 6,
+                  background: result.direction === 'LONG' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                  color: result.direction === 'LONG' ? T.green : T.red,
+                }}>
+                  {result.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}
+                </div>
+                {dir === 'AUTO' && (
+                  <div style={{ fontSize: 10, color: T.muted, fontStyle:'italic' }}>auto-detected</div>
+                )}
+                <div style={{ fontSize: 10, color: T.muted, marginLeft:'auto' }}>
+                  News risk: <b style={{ color: result.newsRisk === 'HIGH' ? T.red : result.newsRisk === 'MED' ? T.amber : T.green }}>{result.newsRisk}</b>
+                </div>
+              </div>
+
+              <div style={{ fontFamily:'monospace', fontSize: 28, fontWeight: 900, marginBottom: 6 }}>
+                {fmtPrice(sym, result.price)}
+              </div>
+
+              <TpSlBar
+                entry={result.price}
+                tp1={result.tp1Num}
+                tp2={result.tp2Num}
+                sl={result.slNum}
+                direction={result.direction}
+              />
+            </div>
+
+            {/* Levels table */}
+            <div style={{ minWidth: 148 }}>
+              {[
+                ['Entry', result.price,   T.text],
+                ['SL',    result.slNum,   T.red],
+                ['TP1',   result.tp1Num,  '#34D399'],
+                ['TP2',   result.tp2Num,  T.green],
+              ].map(([lbl, val, col]) => (
+                <div key={lbl} style={{ display:'flex', justifyContent:'space-between', gap: 20, marginBottom: 8 }}>
+                  <span style={{ color: T.muted, fontSize: 11, fontWeight: 700 }}>{lbl}</span>
+                  <span style={{ color: col, fontSize: 12, fontWeight: 800, fontFamily:'monospace' }}>
+                    {fmtPrice(sym, val)}
+                  </span>
+                </div>
+              ))}
+              <div style={{ borderTop:`1px solid ${T.border}`, paddingTop: 8, fontSize: 10, color: T.sub }}>
+                R:R 1:{(Math.abs(result.tp1Num - result.price) / Math.abs(result.price - result.slNum)).toFixed(1)} / 1:{(Math.abs(result.tp2Num - result.price) / Math.abs(result.price - result.slNum)).toFixed(1)}
+              </div>
+            </div>
+          </div>
+
+          {/* TA factors */}
+          <div style={{ display:'flex', flexWrap:'wrap', gap: 7, marginBottom: 14 }}>
+            {result.factors.map((f, i) => (
+              <div key={i} style={{
+                padding: '5px 11px', borderRadius: 8, fontSize: 11,
+                background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+              }}>
+                <span style={{ color: T.muted, fontWeight: 700 }}>{f.k}: </span>
+                <span style={{ color: f.c, fontWeight: 600 }}>{f.v}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Rationale */}
+          <div style={{
+            padding: '13px 16px', borderRadius: 10, marginBottom: 12,
+            background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)',
+            fontSize: 12, color: T.sub, lineHeight: 1.75,
+          }}>
+            {result.rationale}
+          </div>
+
+          {/* Compliance */}
+          <div style={{
+            padding: '10px 14px', borderRadius: 8, marginBottom: 14,
+            background: result.compliance === 'WARNING' ? 'rgba(239,68,68,0.07)' : 'rgba(16,185,129,0.06)',
+            border: `1px solid ${result.compliance === 'WARNING' ? 'rgba(239,68,68,0.18)' : 'rgba(16,185,129,0.14)'}`,
+            fontSize: 12, color: result.compliance === 'WARNING' ? T.red : '#34D399',
+          }}>
+            {result.compliance === 'WARNING' ? '⚠️' : '✅'} {result.compNote}
+          </div>
+
+          {/* PosSizer + Journal */}
+          <div style={{ display:'flex', gap: 12, flexWrap:'wrap' }}>
+            <PosSizer
+              symbol={sym}
+              entry={result.price}
+              sl={result.slNum}
+              tp1={result.tp1Num}
+              tp2={result.tp2Num}
+              accountBalance={100000}
+            />
+            <SignalNote signalId={`manual_${sym}_${tf}`}/>
+          </div>
         </div>
       )}
-      <iframe
-        title="Signals"
-        src="signal.html?embed=1"
-        className="pp-signal-frame"
-        onLoad={() => setLoaded(true)}
-        style={{ display: loaded ? 'block' : 'none' }}
-      />
+
+      {/* ── Empty state ── */}
+      {!result && !loading && (
+        <div style={{
+          textAlign:'center', padding: '64px 24px',
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          borderRadius: 16, color: T.muted,
+        }}>
+          <div style={{ fontSize: 44, marginBottom: 14 }}>⚡</div>
+          <div style={{ fontWeight: 800, fontSize: 17, color: T.sub, marginBottom: 8 }}>
+            Select a symbol and hit Run Analysis
+          </div>
+          <div style={{ fontSize: 13, maxWidth: 360, margin:'0 auto', lineHeight: 1.7 }}>
+            Live OHLCV data → SMC structure · EMA trend · RSI · MACD · Bollinger Bands → confidence score + trade parameters
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3614,6 +4190,35 @@ function SettingsWorkbench({ data, accountView, onUpdateAccount }) {
   const [localSettings, setLocalSettings] = useState(null);
   const [saving, setSaving] = useState(false);
   const [prefs, setPrefs] = useState(() => LS.get('ui_prefs', { theme:'dark', push:true, sound:false, summaries:true }));
+
+  // ── Telegram state ──────────────────────────────────────────────────────
+  const [tgToken,  setTgToken]  = useState(() => LS.get('tg_token', ''));
+  const [tgChatId, setTgChatId] = useState(() => LS.get('tg_chat_id', ''));
+  const [tgTest,   setTgTest]   = useState({ loading: false, result: null });
+
+  const saveTgCreds = () => {
+    LS.set('tg_token',   tgToken);
+    LS.set('tg_chat_id', tgChatId);
+  };
+
+  const testTelegram = async () => {
+    setTgTest({ loading: true, result: null });
+    try {
+      const r = await fetch(`${SB_URL}/functions/v1/telegram-bot`, {
+        method: 'POST',
+        headers: { ...SB_JSON_HDR },
+        body: JSON.stringify({ mode: 'status', chat_id: tgChatId || undefined }),
+      });
+      const json = await r.json().catch(() => ({}));
+      if (r.ok && json.ok) {
+        setTgTest({ loading: false, result: { ok: true, msg: '✅ Message sent! Check your Telegram.' } });
+      } else {
+        setTgTest({ loading: false, result: { ok: false, msg: json.error || `HTTP ${r.status}` } });
+      }
+    } catch (e) {
+      setTgTest({ loading: false, result: { ok: false, msg: e.message } });
+    }
+  };
 
   useEffect(() => {
     setLocalSettings(data.settings ? { ...data.settings } : null);
@@ -3739,11 +4344,101 @@ function SettingsWorkbench({ data, accountView, onUpdateAccount }) {
           <div style={{ color:T.muted, fontSize:13 }}>Loading settings...</div>
         )}
       </div>
+
+      {/* ── Telegram Integration ─────────────────────────────────────── */}
+      <div className="pp-panel" style={{ padding: 20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap: 12, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 16 }}>🤖 Telegram Integration</div>
+            <div style={{ color: T.sub, fontSize: 12, marginTop: 4 }}>
+              Receive real-time push notifications for signals, TP/SL hits and account status
+            </div>
+          </div>
+          <a href="https://t.me/BotFather" target="_blank" rel="noreferrer"
+            style={{ fontSize: 11, color: T.indigo, textDecoration:'none', fontWeight: 700 }}>
+            Get token from @BotFather →
+          </a>
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(2, minmax(0, 1fr))', gap: 12, marginBottom: 14 }}>
+          <label className="pp-panel-solid" style={{ padding: 12, display:'block' }}>
+            <div style={{ color: T.muted, fontSize: 10, fontWeight: 800, letterSpacing:'.05em', marginBottom: 8 }}>BOT TOKEN</div>
+            <input
+              type="password"
+              value={tgToken}
+              onChange={e => setTgToken(e.target.value)}
+              placeholder="1234567890:ABCDef..."
+              style={{
+                width:'100%', padding:'10px 12px', boxSizing:'border-box',
+                background:'rgba(255,255,255,.04)', border:`1px solid ${T.border}`,
+                borderRadius: 8, color: T.text, outline:'none', fontSize: 12, fontFamily:'monospace',
+              }}
+            />
+          </label>
+          <label className="pp-panel-solid" style={{ padding: 12, display:'block' }}>
+            <div style={{ color: T.muted, fontSize: 10, fontWeight: 800, letterSpacing:'.05em', marginBottom: 8 }}>CHAT ID</div>
+            <input
+              type="text"
+              value={tgChatId}
+              onChange={e => setTgChatId(e.target.value)}
+              placeholder="123456789"
+              style={{
+                width:'100%', padding:'10px 12px', boxSizing:'border-box',
+                background:'rgba(255,255,255,.04)', border:`1px solid ${T.border}`,
+                borderRadius: 8, color: T.text, outline:'none', fontSize: 12, fontFamily:'monospace',
+              }}
+            />
+            <div style={{ color: T.muted, fontSize: 10, marginTop: 6 }}>
+              Start your bot → /start → your chat_id appears
+            </div>
+          </label>
+        </div>
+
+        <div style={{ display:'flex', gap: 10, alignItems:'center', flexWrap:'wrap' }}>
+          <button className="pp-btn pp-btn-primary" onClick={() => { saveTgCreds(); }}>
+            💾 Save credentials
+          </button>
+          <button
+            className="pp-btn"
+            onClick={testTelegram}
+            disabled={tgTest.loading || !tgChatId}
+            style={{ opacity: tgChatId ? 1 : 0.4 }}>
+            {tgTest.loading ? '⏳ Sending…' : '📡 Send test message'}
+          </button>
+
+          {tgTest.result && (
+            <div style={{
+              padding: '7px 13px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              background: tgTest.result.ok ? 'rgba(16,185,129,0.10)' : 'rgba(239,68,68,0.10)',
+              border: `1px solid ${tgTest.result.ok ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)'}`,
+              color: tgTest.result.ok ? T.green : T.red,
+            }}>
+              {tgTest.result.msg}
+            </div>
+          )}
+
+          {tgToken && tgChatId && !tgTest.result && (
+            <div style={{ fontSize: 11, color: T.green }}>✓ Credentials saved locally</div>
+          )}
+        </div>
+
+        <div style={{
+          marginTop: 16, padding: '12px 16px', borderRadius: 10,
+          background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+          fontSize: 12, color: T.sub, lineHeight: 1.8,
+        }}>
+          <b style={{ color: T.text }}>Setup steps:</b><br/>
+          1. Message <code style={{ color: T.indigo }}>@BotFather</code> on Telegram → <code style={{ color: T.indigo }}>/newbot</code> → copy the token above<br/>
+          2. Send your bot <code style={{ color: T.indigo }}>/start</code> → your chat_id appears in bot logs or use <code style={{ color: T.indigo }}>@userinfobot</code><br/>
+          3. Run <code style={{ color: T.indigo }}>supabase secrets set TELEGRAM_BOT_TOKEN=&lt;token&gt;</code> and <code style={{ color: T.indigo }}>TELEGRAM_CHAT_ID=&lt;id&gt;</code><br/>
+          4. Push notifications auto-fire on new signals, TP1/TP2 hit, SL hit, kill-switch
+        </div>
+      </div>
     </div>
   );
 }
 
-function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup, gateData }) {
+function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup, gateData, onNotif, notifPerm }) {
   const titles = {
     dashboard: ['Dashboard', 'Live operator overview'],
     signals:   ['Signals',   'SmartChart + Signal Engine'],
@@ -3799,6 +4494,11 @@ function UnifiedAppHeader({ screen, phase, accountView, syncState, rtStatus, las
             <span style={{ color:T.indigo }}>{fmtUsd(accountView.size || 100000)}</span>
             <span style={{ color:T.muted }}>{phase.toUpperCase()}</span>
           </div>
+          {onNotif && (
+            <button className="pp-btn" onClick={onNotif} title={notifPerm === 'granted' ? 'Уведомления включены' : 'Включить уведомления'} style={{ fontSize:16, padding:'8px 10px', color: notifPerm === 'granted' ? '#10B981' : undefined }}>
+              {notifPerm === 'granted' ? '🔔' : '🔕'}
+            </button>
+          )}
           <button className="pp-btn" onClick={() => onRefresh('updating')}>↻</button>
           <button className="pp-btn pp-btn-primary" onClick={onSetup}>Account</button>
         </div>
@@ -3819,7 +4519,7 @@ const TABS = [
   { id:'settings',  label:'Settings',  icon:'⚙️' },
 ];
 
-function PropPilotAI() {
+function PropPilotAI({ pushMgr }) {
   const hashScreen = useCallback(() => {
     const raw = window.location.hash.replace('#', '');
     return TABS.some(t => t.id === raw) ? raw : null;
@@ -3831,6 +4531,21 @@ function PropPilotAI() {
     firm:'FTMO', size:100000, currentPnL:0, todayPnL:0, tradingDays:7,
   }));
   const appData = useUnifiedAppData();
+  const { show: showToast } = useToast();
+  const [notifPerm, setNotifPerm] = useState(() =>
+    typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
+  );
+
+  // Subscribe Realtime for push notifications
+  useEffect(() => {
+    if (!sbClient || !pushMgr) return;
+    pushMgr.subscribeOutcomes(sbClient, (s, isWin) => {
+      showToast(
+        `${isWin ? '✅' : '❌'} ${s.symbol} — ${s.outcome?.replace('_',' ')} ${s.pnl_r != null ? (s.pnl_r > 0 ? '+' : '') + s.pnl_r.toFixed(2) + 'R' : ''}`,
+        isWin ? 'success' : 'error', 7000
+      );
+    });
+  }, [pushMgr, showToast]);
 
   useEffect(() => { LS.set('screen', screen); }, [screen]);
   useEffect(() => { LS.set('phase', phase); }, [phase]);
@@ -3891,6 +4606,12 @@ function PropPilotAI() {
         onRefresh={appData.refresh}
         onSetup={() => setShowSetup(true)}
         gateData={gateData}
+        notifPerm={notifPerm}
+        onNotif={async () => {
+          const p = await pushMgr?.requestPermission();
+          setNotifPerm(p || 'unsupported');
+          if (p === 'granted') showToast('🔔 Уведомления включены! TP/SL оповещения активны.', 'success');
+        }}
       />
 
       <div className="pp-content">
@@ -3935,8 +4656,127 @@ function PropPilotAI() {
   );
 }
 
+// ── Service Worker + Push Notifications ──────────────────────────────────
+const PushMgr = {
+  swReg: null,
+
+  async init() {
+    if (!('serviceWorker' in navigator)) return;
+    try {
+      this.swReg = await navigator.serviceWorker.register('/sw.js');
+      console.log('[PWA] Service Worker registered');
+    } catch(e) { console.warn('[PWA] SW registration failed:', e); }
+  },
+
+  async requestPermission() {
+    if (!('Notification' in window)) return 'unsupported';
+    if (Notification.permission === 'granted') return 'granted';
+    const result = await Notification.requestPermission();
+    return result;
+  },
+
+  notify(title, body, tag = 'proppilot', url = '/index.html') {
+    if (Notification.permission !== 'granted') return;
+    const n = new Notification(title, {
+      body,
+      tag,
+      icon: '/manifest.json',
+      requireInteraction: false,
+      silent: false,
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => n.close(), 8000);
+  },
+
+  // Subscribe to Supabase Realtime for outcome changes
+  subscribeOutcomes(sbClient, onOutcome) {
+    if (!sbClient) return;
+    sbClient
+      .channel('outcome-notifs')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'signal_analyses',
+        filter: 'outcome=neq.OPEN',
+      }, payload => {
+        const s = payload.new;
+        const isWin = ['TP1_HIT','TP2_HIT'].includes(s.outcome);
+        const emoji = s.outcome === 'TP2_HIT' ? '🎯' : s.outcome === 'TP1_HIT' ? '✅' : '❌';
+        const title = `${emoji} ${s.symbol} — ${s.outcome?.replace('_',' ')}`;
+        const body  = `${s.signal_state} · ${s.pnl_r != null ? (s.pnl_r > 0 ? '+' : '') + s.pnl_r.toFixed(2) + 'R' : ''}`;
+        this.notify(title, body, `outcome-${s.id}`, '/index.html#analytics');
+        if (onOutcome) onOutcome(s, isWin);
+      })
+      .subscribe();
+  },
+};
+
+PushMgr.init();
+
+// ── Error Boundary ────────────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('[PropPilot ErrorBoundary]', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          minHeight:'100vh', display:'flex', alignItems:'center',
+          justifyContent:'center', background:'#05070f', color:'#F1F5F9',
+          flexDirection:'column', gap:20, padding:32, textAlign:'center'
+        }}>
+          <div style={{ fontSize:56 }}>⚠️</div>
+          <div style={{ fontSize:22, fontWeight:900, letterSpacing:'-0.5px' }}>Something went wrong</div>
+          <div style={{
+            color:'#94A3B8', fontSize:13, maxWidth:480,
+            fontFamily:'monospace', background:'rgba(255,255,255,0.05)',
+            padding:'12px 16px', borderRadius:10, wordBreak:'break-all'
+          }}>
+            {this.state.error?.message || 'Unknown error'}
+          </div>
+          <div style={{ display:'flex', gap:12 }}>
+            <button
+              onClick={() => this.setState({ hasError:false, error:null })}
+              style={{
+                padding:'10px 24px', background:'rgba(59,130,246,0.2)',
+                border:'1px solid rgba(59,130,246,0.4)', borderRadius:10,
+                color:'#fff', cursor:'pointer', fontSize:14, fontWeight:600
+              }}
+            >
+              ↺ Retry
+            </button>
+            <button
+              onClick={() => { this.setState({ hasError:false, error:null }); window.location.reload(); }}
+              style={{
+                padding:'10px 24px', background:'rgba(255,255,255,0.07)',
+                border:'1px solid rgba(255,255,255,0.12)', borderRadius:10,
+                color:'#94A3B8', cursor:'pointer', fontSize:14
+              }}
+            >
+              Hard Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <ToastProvider><PropPilotAI/></ToastProvider>
+  <ErrorBoundary>
+    <ToastProvider>
+      <PropPilotAI pushMgr={PushMgr}/>
+    </ToastProvider>
+  </ErrorBoundary>
 );
 </script>
 </body>

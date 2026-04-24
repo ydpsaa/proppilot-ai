@@ -1,0 +1,30 @@
+{
+  "name": "PropPilot AI",
+  "short_name": "PropPilot",
+  "description": "Prop Trading OS — SMC signals, paper trading, challenge tracker",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#05070f",
+  "theme_color": "#3B82F6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='32' fill='url(%23g)'/><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%233B82F6'/><stop offset='1' stop-color='%2314B8A6'/></linearGradient></defs><text x='96' y='130' font-size='110' font-weight='900' text-anchor='middle' fill='white' font-family='Inter,system-ui,sans-serif'>P</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='80' fill='url(%23g)'/><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%233B82F6'/><stop offset='1' stop-color='%2314B8A6'/></linearGradient></defs><text x='256' y='360' font-size='300' font-weight='900' text-anchor='middle' fill='white' font-family='Inter,system-ui,sans-serif'>P</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ],
+  "screenshots": [],
+  "categories": ["finance", "productivity"],
+  "shortcuts": [
+    { "name": "Dashboard",  "url": "/index.html#dashboard",  "description": "Open Dashboard"  },
+    { "name": "Signals",    "url": "/index.html#signals",    "description": "Open Signals"    },
+    { "name": "Analytics",  "url": "/analytics.html",        "description": "Open Analytics"  },
+    { "name": "Signal Engine", "url": "/signal.html",        "description": "Analyze instruments" }
+  ]
+}

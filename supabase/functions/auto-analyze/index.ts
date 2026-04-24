@@ -562,6 +562,35 @@ Deno.serve(async (req) => {
     });
   }
 
+  // ── Telegram push for actionable signals (fire-and-forget) ───────────────
+  if (!dryRun && actionableSignals.length > 0) {
+    const tgUrl = `${SB_URL}/functions/v1/telegram-bot`;
+    const tgKey = SB_KEY;
+    Promise.all(
+      actionableSignals.slice(0, 3).map(sig =>
+        fetch(tgUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${tgKey}` },
+          body: JSON.stringify({
+            mode: 'signal',
+            signal: {
+              symbol:       sig.symbol,
+              signal_state: sig.verdict,
+              direction:    sig.direction,
+              confidence:   sig.confidence,
+              price:        sig.entry_price,
+              tp1:          sig.tp1_price,
+              tp2:          sig.tp2_price,
+              sl:           sig.sl_price,
+              timeframe:    '15m',
+              session_name: session,
+            },
+          }),
+        }).catch(e => console.warn('[telegram-push] failed:', e.message))
+      )
+    );
+  }
+
   return json({
     ok:         true,
     dryRun,

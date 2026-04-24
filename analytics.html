@@ -727,14 +727,45 @@ function Analytics() {
               <SignalOutcomeFlow signals={signals}/>
             </div>
 
-            {/* ── TABS ── */}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
+            {/* ── TABS + CSV EXPORT ── */}
+            <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap', alignItems:'center' }}>
               {[['overview','📊 Overview'],['pillars','📐 Analytical Pillars'],['setups','🔬 Setups Table'],['heatmap','🕐 Hourly Heatmap']].map(([id, label]) => (
                 <button key={id} onClick={() => setActiveTab(id)}
                   style={{ padding: '8px 18px', borderRadius: 10, border: `1px solid ${activeTab===id?C.amber:'rgba(255,255,255,0.1)'}`, background: activeTab===id?`rgba(245,158,11,0.12)`:'rgba(255,255,255,0.04)', color: activeTab===id?C.amber:C.sub, fontWeight: 700, fontSize: 13, cursor: 'pointer', backdropFilter:'blur(12px)', boxShadow: activeTab===id?`0 0 16px rgba(245,158,11,0.15)`:'none' }}>
                   {label}
                 </button>
               ))}
+              <div style={{ flex:1 }}/>
+              <button
+                onClick={() => {
+                  if (!signals.length) return;
+                  const cols = ['id','symbol','signal_state','direction','timeframe','session_name','outcome','pnl_r','confidence','price','tp1','tp2','sl','created_at','updated_at','entry_time','exit_time'];
+                  const esc  = v => v == null ? '' : (typeof v === 'string' && (v.includes(',') || v.includes('"') || v.includes('\n'))) ? `"${v.replace(/"/g,'""')}"` : String(v);
+                  const rows = [cols.join(','), ...signals.map(s => cols.map(c => esc(s[c])).join(','))].join('\n');
+                  const blob = new Blob([rows], { type:'text/csv' });
+                  const url  = URL.createObjectURL(blob);
+                  const a    = document.createElement('a');
+                  a.href     = url;
+                  a.download = `proppilot-signals-${new Date().toISOString().slice(0,10)}.csv`;
+                  a.click();
+                  setTimeout(() => URL.revokeObjectURL(url), 5000);
+                }}
+                style={{
+                  padding: '8px 16px', borderRadius: 10,
+                  border: '1px solid rgba(16,185,129,0.3)',
+                  background: 'rgba(16,185,129,0.1)',
+                  color: '#10B981', fontWeight: 700, fontSize: 12,
+                  cursor: 'pointer', display:'flex', alignItems:'center', gap:6,
+                  backdropFilter:'blur(12px)',
+                }}
+              >
+                ⬇ Export CSV
+                {signals.length > 0 && (
+                  <span style={{ background:'rgba(16,185,129,0.2)', borderRadius:6, padding:'1px 6px', fontSize:10 }}>
+                    {signals.length}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* ── OVERVIEW TAB ── */}
