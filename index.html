@@ -1633,8 +1633,58 @@ function ChallengeTracker({ cfg, account, onReset }) {
 
   const inp2 = { padding:'8px 12px', background:'rgba(255,255,255,0.06)', border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:14, outline:'none', width:'100%', boxSizing:'border-box' };
 
+  // ── Can I Trade Today? banner ───────────────────────────────────────────
+  const allTodayTrades  = LS.get('trades', []);
+  const todayStr2       = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+  const todayPnlChk     = allTodayTrades.filter(t => t.date === todayStr2).reduce((s,t) => s + (t.pnl||0), 0);
+  const todayLossChk    = Math.abs(Math.min(0, todayPnlChk));
+  const dayUsedPctBanner= dailyLim ? (todayLossChk / dailyLim) * 100 : 0;
+  const maxDDUsedBanner = Math.abs(Math.min(0, curPnl));
+  const maxDDPctBanner  = (maxDD > 0) ? (maxDDUsedBanner / maxDD) * 100 : 0;
+  const tradeBanner = (() => {
+    if (dailyLim && todayLossChk >= dailyLim * 0.99)
+      return { verdict:'STOP',    color:T.red,   icon:'🛑', msg:'Daily loss limit reached. No more trades today.' };
+    if (maxDDUsedBanner >= maxDD * 0.99)
+      return { verdict:'STOP',    color:T.red,   icon:'🛑', msg:'Max drawdown breached. Stop trading immediately.' };
+    if (dailyLim && dayUsedPctBanner >= 70)
+      return { verdict:'CAREFUL', color:T.amber, icon:'⚠️', msg:`${(100-dayUsedPctBanner).toFixed(0)}% of daily limit left. Reduce position size.` };
+    if (maxDDPctBanner >= 60)
+      return { verdict:'CAREFUL', color:T.amber, icon:'⚠️', msg:'Approaching max drawdown. Only top-grade setups.' };
+    return { verdict:'YES', color:T.green, icon:'✅',
+      msg: dailyLim ? `$${(dailyLim - todayLossChk).toFixed(0)} daily budget remaining.` : 'No limits hit. Clear to trade.' };
+  })();
+
   return (
     <div style={{ maxWidth:980, margin:'0 auto' }}>
+
+      {/* ── CAN I TRADE TODAY? BANNER ── */}
+      <div style={{
+        display:'flex', alignItems:'center', gap:20, padding:'18px 24px', borderRadius:14, marginBottom:24, flexWrap:'wrap', justifyContent:'space-between',
+        background: tradeBanner.verdict === 'YES' ? 'rgba(16,185,129,0.07)' : tradeBanner.verdict === 'CAREFUL' ? 'rgba(245,166,35,0.07)' : 'rgba(239,68,68,0.08)',
+        border: `1.5px solid ${tradeBanner.verdict === 'YES' ? 'rgba(16,185,129,0.3)' : tradeBanner.verdict === 'CAREFUL' ? 'rgba(245,166,35,0.35)' : 'rgba(239,68,68,0.4)'}`,
+      }}>
+        <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+          <div style={{ fontSize:36 }}>{tradeBanner.icon}</div>
+          <div>
+            <div style={{ fontSize:10, color:T.muted, fontWeight:800, letterSpacing:'.1em', textTransform:'uppercase', marginBottom:4 }}>Can I Trade Today?</div>
+            <div style={{ fontSize:26, fontWeight:900, color:tradeBanner.color, lineHeight:1 }}>{tradeBanner.verdict}</div>
+          </div>
+        </div>
+        <div style={{ color:T.sub, fontSize:13, lineHeight:1.6, flex:1, minWidth:200 }}>{tradeBanner.msg}</div>
+        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+          {dailyLim && (
+            <div style={{ textAlign:'center', padding:'8px 14px', background:'rgba(255,255,255,0.04)', borderRadius:9, border:`1px solid ${T.border}` }}>
+              <div style={{ color:T.muted, fontSize:10, fontWeight:700, letterSpacing:'.07em' }}>DAILY USED</div>
+              <div style={{ color: dayUsedPctBanner > 70 ? T.red : T.amber, fontWeight:800, fontSize:16 }}>{dayUsedPctBanner.toFixed(0)}%</div>
+            </div>
+          )}
+          <div style={{ textAlign:'center', padding:'8px 14px', background:'rgba(255,255,255,0.04)', borderRadius:9, border:`1px solid ${T.border}` }}>
+            <div style={{ color:T.muted, fontSize:10, fontWeight:700, letterSpacing:'.07em' }}>MAX DD</div>
+            <div style={{ color: maxDDPctBanner > 70 ? T.red : T.amber, fontWeight:800, fontSize:16 }}>{maxDDPctBanner.toFixed(0)}%</div>
+          </div>
+        </div>
+      </div>
+
       {/* Firm header */}
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24, flexWrap:'wrap', gap:12 }}>
         <div style={{ display:'flex', alignItems:'center', gap:14 }}>
@@ -2179,7 +2229,7 @@ function TradeChart({ candles, levels, dir, tf }) {
 }
 
 // ── Log-Plan shortcut button (used inside CheckTrade result) ─────────────
-function LogPlanButton({ sym, dir, r }) {
+function LogPlanButton({ sym, dir, r, onNavigate }) {
   const [saved, setSaved] = useState(false);
 
   const handleSave = () => {
@@ -2195,28 +2245,32 @@ function LogPlanButton({ sym, dir, r }) {
     };
     LS.set('pendingPlan', plan);
     setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    // Auto-navigate to Journal after short delay so user sees confirmation
+    if (onNavigate) setTimeout(() => onNavigate('journal'), 900);
+    else setTimeout(() => setSaved(false), 3000);
   };
 
   if (saved) return (
     <div style={{ padding:'10px 14px', background:'rgba(52,211,153,0.1)', border:'1px solid rgba(52,211,153,0.3)', borderRadius:9, fontSize:13, color:T.green, fontWeight:700 }}>
-      ✓ Plan saved → open Journal tab to log the trade
+      ✓ Plan saved — opening Journal…
     </div>
   );
 
   return (
     <button onClick={handleSave}
-      style={{ width:'100%', padding:'11px 0', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.28)', borderRadius:9, color:'#818CF8', fontSize:13, fontWeight:700, cursor:'pointer' }}>
-      📝 Save Plan to Journal
+      style={{ width:'100%', padding:'12px 0', background:`linear-gradient(135deg,rgba(52,211,153,0.15),rgba(16,185,129,0.12))`, border:'1px solid rgba(52,211,153,0.3)', borderRadius:9, color:'#34D399', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+      📝 Log This Trade in Journal →
     </button>
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 
-function CheckTrade({ account, phase }) {
-  const [sym,       setSym]    = useState('XAU/USD');
-  const [dir,          setDir]         = useState('LONG');
+function CheckTrade({ account, phase, onNavigate }) {
+  // Auto-fill from Signals tab ("Validate Setup" button) or Today tab
+  const pendingSig = LS.get('pendingSignal', null);
+  const [sym,       setSym]    = useState(() => { if (pendingSig?.sym) { LS.set('pendingSignal', null); return pendingSig.sym; } return 'XAU/USD'; });
+  const [dir,          setDir]         = useState(() => pendingSig?.dir || 'LONG');
   const [loading,      setLoading]     = useState(false);
   const [result,       setResult]      = useState(null);
   const [loadStep,     setStep]        = useState('');
@@ -2489,7 +2543,7 @@ function CheckTrade({ account, phase }) {
                   <span style={{ color:T.sub, fontSize:12 }}>{r.invalidation}</span>
                 </div>
                 {/* Log Trade Plan shortcut */}
-                <LogPlanButton sym={sym} dir={dir} r={r}/>
+                <LogPlanButton sym={sym} dir={dir} r={r} onNavigate={onNavigate}/>
               </div>
             )}
 
@@ -2515,11 +2569,97 @@ function CheckTrade({ account, phase }) {
 // AI JOURNAL
 // ═══════════════════════════════════════════════════════════════════════════
 
-const COACH_TEXT = {
-  2: { body:'Classic FOMO pattern. Price moved 22 pips past the entry zone. R:R collapsed from planned 1:2.1 to actual 1:1.5. H4 structure was bearish at entry — LONG against dominant trend with no CHoCH on H1.', rec:'Set price alerts at your zone. If price has left — skip the trade. A missed trade costs $0.' },
-  5: { body:'Opened 18 minutes after the previous EUR/USD loss — revenge trade signature. No HTF support, EUR/USD in H4 downtrend. No LTF demand signal at entry.', rec:'30-minute cooldown after every losing trade. Two emotional entries back-to-back are the #1 cause of blown funded accounts.' },
-};
-const CLEAN = 'Clean execution. Entry aligned with H4 OB, M15 demand absorption confirmed before opening. Risk within limits, closed at TP1. Use this as your reference template.';
+// ── Dynamic AI coaching — generates real feedback from trade data ──────────
+function generateCoachFeedback(trade, allTrades) {
+  if (!trade) return { body: 'Select a trade to see analysis.', rec: null };
+
+  const issues = [];
+  const recs   = [];
+
+  // ── Detect issue keywords from trade.issue field
+  const issue = (trade.issue || '').toLowerCase();
+  const isFomo    = issue.includes('fomo');
+  const isRevenge = issue.includes('revenge');
+  const isAgainst = issue.includes('against') || issue.includes('plan');
+  const isEarly   = issue.includes('early');
+  const isLate    = issue.includes('late') || issue.includes('past');
+  const hasIssue  = isFomo || isRevenge || isAgainst || isEarly || isLate || issue.length > 0;
+
+  // ── Score analysis
+  const score = trade.score || 50;
+  const scoreLabel = score >= 75 ? 'high-quality A+ setup'
+                   : score >= 60 ? 'above-average setup'
+                   : score >= 45 ? 'marginal setup'
+                   : 'low-quality entry — below your minimum threshold';
+
+  // ── R:R analysis
+  const rr = parseFloat(trade.rr) || 0;
+  const rrNote = rr >= 2.0 ? `R:R of ${rr} is excellent — this is the target.`
+               : rr >= 1.5 ? `R:R of ${rr} is acceptable but aim for 2+.`
+               : rr > 0    ? `R:R of ${rr} is below ideal. Minimum should be 1.5.`
+               : 'No R:R recorded.';
+
+  // ── Win/Loss specific feedback
+  if (trade.win) {
+    issues.push(`This was a winning ${trade.dir || ''} trade on ${trade.sym || 'unknown'} scored ${score}/100 — ${scoreLabel}.`);
+    if (rr >= 2) issues.push(rrNote);
+    else issues.push(`${rrNote} On winners, always let the trade breathe to TP2.`);
+    if (!hasIssue) issues.push('No execution issues detected. Clean entry, managed well.');
+  } else {
+    issues.push(`Loss on ${trade.sym || 'unknown'} ${trade.dir || ''} — AI score was ${score}/100 (${scoreLabel}).`);
+    if (score < 50) issues.push('The AI score below 50 at entry was a warning sign. This trade should have been skipped.');
+    if (rr > 0 && rr < 1.5) issues.push(`R:R was ${rr} — insufficient reward for the risk taken. Minimum 1.5:1 before entry.`);
+  }
+
+  // ── Emotional pattern detection
+  if (isFomo) {
+    issues.push('FOMO pattern detected. Price had moved past the optimal entry zone before the order was placed.');
+    recs.push('Set price alerts at your zone. If price has left — skip it. A missed trade costs $0; a FOMO trade costs real money.');
+  }
+  if (isRevenge) {
+    // Check if there's a prior loss in close sequence
+    const sortedAll = [...allTrades].sort((a,b) => b.id - a.id);
+    const idx = sortedAll.findIndex(t => t.id === trade.id);
+    const prevTrade = sortedAll[idx + 1];
+    const prevWasLoss = prevTrade && !prevTrade.win;
+    issues.push(prevWasLoss
+      ? `Revenge trade signature — opened shortly after a ${prevTrade.sym} loss. No cooling off between trades.`
+      : 'Revenge trade flag. Review your emotional state at time of entry.');
+    recs.push('Mandatory 30-minute cooldown after every loss. Two emotional entries in sequence are the #1 cause of blown funded accounts.');
+  }
+  if (isAgainst) {
+    issues.push('Entry was against the original trade plan or HTF trend direction. Plan deviation is a discipline failure.');
+    recs.push('Write your plan before the session. If price does not reach your zone — no trade. Discipline over opportunity.');
+  }
+  if (isEarly) {
+    issues.push('Early entry — entered before confirmation. Patience is a trading edge.');
+    recs.push('Wait for the candle to close as confirmation. Early entries reduce R:R and increase failure rate.');
+  }
+  if (isLate) {
+    issues.push('Late entry — price had moved past the optimal zone. R:R was compromised before entry.');
+    recs.push('Use limit orders at your zone rather than market orders chasing price.');
+  }
+
+  // ── Clean trade
+  if (!hasIssue && trade.win) {
+    recs.push('Use this trade as your reference template. Review it before sessions to reinforce the pattern.');
+  } else if (!hasIssue && !trade.win) {
+    recs.push('Sometimes clean setups lose. Review the setup objectively — if the entry was correct, the process was right even if the outcome was not.');
+  }
+
+  // ── P&L feedback
+  if (trade.pnl !== undefined) {
+    const pnlNote = Math.abs(trade.pnl) > 500
+      ? ` P&L of ${trade.pnl >= 0 ? '+' : ''}$${trade.pnl} is above your typical trade size — check position sizing.`
+      : '';
+    if (pnlNote) issues.push(pnlNote);
+  }
+
+  return {
+    body: issues.join(' ') || 'Entry data is minimal — add more detail when logging trades for better coaching.',
+    rec:  recs.length > 0 ? recs.join(' ') : null,
+  };
+}
 
 // ── Equity curve SVG ────────────────────────────────────────────────────────
 function EquityCurve({ trades }) {
@@ -2745,13 +2885,20 @@ function Journal({ trades, setTrades }) {
                   <div style={{ color:T.sub, fontSize:13 }}>{sel.issue}</div>
                 </div>
               )}
-              <p style={{ color:T.sub, fontSize:13, lineHeight:1.82, margin:'0 0 14px' }}>{COACH_TEXT[sel.id]?.body || CLEAN}</p>
-              {COACH_TEXT[sel.id]?.rec && (
-                <div style={{ padding:'10px 14px', background:'rgba(251,191,36,0.07)', border:'1px solid rgba(251,191,36,0.22)', borderRadius:8 }}>
-                  <span style={{ color:T.yellow, fontSize:12, fontWeight:700 }}>💡 REC: </span>
-                  <span style={{ color:T.sub, fontSize:12 }}>{COACH_TEXT[sel.id].rec}</span>
-                </div>
-              )}
+              {(() => {
+                const coaching = generateCoachFeedback(sel, trades);
+                return (
+                  <>
+                    <p style={{ color:T.sub, fontSize:13, lineHeight:1.82, margin:'0 0 14px' }}>{coaching.body}</p>
+                    {coaching.rec && (
+                      <div style={{ padding:'10px 14px', background:'rgba(251,191,36,0.07)', border:'1px solid rgba(251,191,36,0.22)', borderRadius:8 }}>
+                        <span style={{ color:T.yellow, fontSize:12, fontWeight:700 }}>💡 REC: </span>
+                        <span style={{ color:T.sub, fontSize:12 }}>{coaching.rec}</span>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
             <div style={{ ...card }}>
               <div style={{ color:T.sub, fontSize:13, fontWeight:700, marginBottom:14 }}>Week Discipline Scan</div>
@@ -3522,6 +3669,258 @@ function LivePriceTicker() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TODAY SCREEN — Morning briefing: Can I trade? What's active? Daily P&L.
+// ═══════════════════════════════════════════════════════════════════════════
+function TodayScreen({ data, phase, accountView, trades, onNavigate }) {
+  const ch       = LS.get('challenge', null);
+  const firm     = ch ? PROP_FIRMS[ch.firmId] : null;
+  const type     = (firm && ch?.typeId) ? firm.types[ch.typeId] : null;
+  const phIdx    = ch?.curPhaseIdx ?? 0;
+  const phName   = type ? type.phases[phIdx] : null;
+  const rules    = (phName && type) ? type.rules[phName] : null;
+  const size     = ch ? ch.size : (accountView?.size || 100000);
+  const curPnl   = ch?.curPnl || 0;
+
+  // Today's trades
+  const todayStr    = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+  const todayTrades = trades.filter(t => t.date === todayStr);
+  const todayPnl    = todayTrades.reduce((s, t) => s + (t.pnl || 0), 0);
+  const todayLoss   = Math.abs(Math.min(0, todayPnl));
+  const wins        = todayTrades.filter(t => t.win).length;
+  const losses      = todayTrades.filter(t => !t.win).length;
+
+  // Challenge limits
+  const dailyLim     = rules?.daily ? size * rules.daily : null;
+  const maxDDLimit   = rules ? size * (rules.maxDD || 0.1) : null;
+  const dailyUsedPct = dailyLim ? (todayLoss / dailyLim) * 100 : 0;
+  const maxDDUsed    = Math.abs(Math.min(0, curPnl));
+  const maxDDPct     = maxDDLimit ? (maxDDUsed / maxDDLimit) * 100 : 0;
+
+  // CAN I TRADE TODAY?
+  const canTrade = (() => {
+    if (dailyLim && todayLoss >= dailyLim * 0.99)
+      return { verdict:'STOP',    color:T.red,    icon:'🛑', msg:'Daily loss limit reached. No more trades today.' };
+    if (maxDDLimit && maxDDUsed >= maxDDLimit * 0.99)
+      return { verdict:'STOP',    color:T.red,    icon:'🛑', msg:'Max drawdown breached. Do not open new positions.' };
+    if (dailyLim && dailyUsedPct >= 70)
+      return { verdict:'CAREFUL', color:T.amber,  icon:'⚠️', msg:`${(100-dailyUsedPct).toFixed(0)}% of daily limit left. Reduce size significantly.` };
+    if (maxDDLimit && maxDDPct >= 60)
+      return { verdict:'CAREFUL', color:T.amber,  icon:'⚠️', msg:'Getting close to max drawdown. Trade only A-grade setups.' };
+    return { verdict:'YES',     color:T.green,  icon:'✅',
+      msg: dailyLim
+        ? `$${(dailyLim - todayLoss).toFixed(0)} daily budget remaining. Clear to trade.`
+        : 'No limits hit. Clear to trade today.' };
+  })();
+
+  // Market session
+  const sess = currentSession();
+
+  // Signals
+  const allSignals    = data.signals || [];
+  const activeSignals = allSignals.filter(s =>
+    ['LONG_NOW','SHORT_NOW'].includes(s.signal_state) && s.outcome === 'OPEN'
+  );
+  const today = new Date().toISOString().slice(0,10);
+  const todaySigCount = allSignals.filter(s => s.created_at?.startsWith(today)).length;
+
+  return (
+    <div className="pp-grid" style={{ gap:20 }}>
+
+      {/* ── CAN I TRADE? HERO BANNER ── */}
+      <div className="pp-panel" style={{
+        padding:'28px 32px',
+        background: canTrade.verdict === 'YES' ? 'rgba(16,185,129,0.06)'
+                  : canTrade.verdict === 'CAREFUL' ? 'rgba(245,166,35,0.06)'
+                  : 'rgba(239,68,68,0.07)',
+        border: `1.5px solid ${canTrade.verdict === 'YES' ? 'rgba(16,185,129,0.28)'
+                              : canTrade.verdict === 'CAREFUL' ? 'rgba(245,166,35,0.32)'
+                              : 'rgba(239,68,68,0.35)'}`,
+      }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:20 }}>
+          <div>
+            <div style={{ color:T.muted, fontSize:10, fontWeight:800, letterSpacing:'.1em', marginBottom:12, textTransform:'uppercase' }}>Can I Trade Today?</div>
+            <div style={{ display:'flex', alignItems:'center', gap:16 }}>
+              <div style={{ fontSize:48, lineHeight:1 }}>{canTrade.icon}</div>
+              <div>
+                <div style={{ fontSize:38, fontWeight:900, color:canTrade.color, lineHeight:1 }}>{canTrade.verdict}</div>
+                <div style={{ color:T.sub, fontSize:13, marginTop:8, lineHeight:1.6, maxWidth:400 }}>{canTrade.msg}</div>
+              </div>
+            </div>
+          </div>
+          <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+            <button onClick={() => onNavigate('signals')} style={{ padding:'11px 22px', background:`linear-gradient(135deg,#6366F1,#4F46E5)`, border:'none', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+              ⚡ Run Signals
+            </button>
+            <button onClick={() => onNavigate('challenge')} style={{ padding:'11px 22px', background:'rgba(255,255,255,0.05)', border:`1px solid ${T.border}`, borderRadius:10, color:T.sub, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+              ◎ Challenge →
+            </button>
+            <button onClick={() => onNavigate('journal')} style={{ padding:'11px 22px', background:'rgba(255,255,255,0.05)', border:`1px solid ${T.border}`, borderRadius:10, color:T.sub, fontSize:13, fontWeight:600, cursor:'pointer' }}>
+              + Log Trade
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 4-STAT STRIP ── */}
+      <div className="pp-today-strip">
+        {[
+          { icon: sess.active ? '🟢' : '⭕', label:'Session Now', value:sess.name, color:sess.color },
+          { icon:'⚡', label:'Active Signals', value:activeSignals.length, color:activeSignals.length > 0 ? T.green : T.muted },
+          { icon:'📋', label:'Trades Today',   value:todayTrades.length,   color:todayTrades.length > 0 ? T.amber : T.muted },
+          { icon: todayPnl >= 0 ? '📈' : '📉', label:"Today's P&L", value:`${todayPnl >= 0 ? '+' : ''}$${todayPnl}`, color:todayPnl > 0 ? T.green : todayPnl < 0 ? T.red : T.muted },
+        ].map(({ icon, label, value, color }) => (
+          <div key={label} className="pp-today-cell">
+            <div style={{ fontSize:20, marginBottom:6 }}>{icon}</div>
+            <div style={{ color:T.muted, fontSize:10, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>{label}</div>
+            <div style={{ color, fontSize:20, fontWeight:900, marginTop:4 }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── RISK LIMITS (only if challenge configured) ── */}
+      {ch && rules && (
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }} className="pp-grid-2x">
+          <div className="pp-panel" style={{ padding:20 }}>
+            <div style={{ fontWeight:700, fontSize:14, marginBottom:14 }}>Daily Risk Budget</div>
+            {dailyLim ? (
+              <>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+                  <span style={{ color:T.sub, fontSize:13 }}>Used today</span>
+                  <span style={{ color: dailyUsedPct > 70 ? T.red : T.amber, fontWeight:800, fontSize:14 }}>
+                    ${todayLoss.toFixed(0)} / ${dailyLim.toLocaleString()}
+                  </span>
+                </div>
+                <div style={{ height:10, background:'rgba(255,255,255,0.06)', borderRadius:6, overflow:'hidden', marginBottom:10 }}>
+                  <div style={{ height:'100%', width:`${Math.min(100, dailyUsedPct).toFixed(1)}%`, background: dailyUsedPct < 50 ? T.green : dailyUsedPct < 80 ? T.amber : T.red, borderRadius:6, transition:'width 0.6s ease' }}/>
+                </div>
+                <div style={{ color:T.muted, fontSize:12 }}>
+                  Remaining: <span style={{ color:T.green, fontWeight:700 }}>${Math.max(0, dailyLim - todayLoss).toFixed(0)}</span>
+                  {' · '}Max 1 trade: <span style={{ color:T.amber, fontWeight:700 }}>${(Math.max(0, dailyLim - todayLoss) * 0.5).toFixed(0)}</span>
+                </div>
+              </>
+            ) : (
+              <div style={{ color:T.muted, fontSize:13, padding:'12px 0' }}>No daily limit for this phase.</div>
+            )}
+          </div>
+          <div className="pp-panel" style={{ padding:20 }}>
+            <div style={{ fontWeight:700, fontSize:14, marginBottom:14 }}>Max Drawdown Buffer</div>
+            {maxDDLimit ? (
+              <>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:8 }}>
+                  <span style={{ color:T.sub, fontSize:13 }}>Used overall</span>
+                  <span style={{ color: maxDDPct > 70 ? T.red : T.amber, fontWeight:800, fontSize:14 }}>
+                    ${maxDDUsed.toFixed(0)} / ${maxDDLimit.toLocaleString()}
+                  </span>
+                </div>
+                <div style={{ height:10, background:'rgba(255,255,255,0.06)', borderRadius:6, overflow:'hidden', marginBottom:10 }}>
+                  <div style={{ height:'100%', width:`${Math.min(100, maxDDPct).toFixed(1)}%`, background: maxDDPct < 50 ? T.green : maxDDPct < 80 ? T.amber : T.red, borderRadius:6, transition:'width 0.6s ease' }}/>
+                </div>
+                <div style={{ color:T.muted, fontSize:12 }}>
+                  Balance floor: <span style={{ color:T.green, fontWeight:700 }}>${(size - maxDDLimit).toLocaleString()}</span>
+                  {' · '}Current: <span style={{ color: curPnl >= 0 ? T.green : T.red, fontWeight:700 }}>${(size + curPnl).toLocaleString()}</span>
+                </div>
+              </>
+            ) : (
+              <div style={{ color:T.muted, fontSize:13, padding:'12px 0' }}>No drawdown limit configured.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── ACTIVE SIGNALS PREVIEW ── */}
+      {activeSignals.length > 0 && (
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+            <div style={{ fontWeight:700, fontSize:15 }}>⚡ Active Signals Now</div>
+            <button onClick={() => onNavigate('signals')} style={{ padding:'6px 14px', background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.28)', borderRadius:8, color:'#818CF8', fontSize:12, fontWeight:700, cursor:'pointer' }}>
+              Signal Engine →
+            </button>
+          </div>
+          {activeSignals.slice(0, 3).map(s => (
+            <div key={s.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'11px 14px', borderRadius:10, marginBottom:8, background:'rgba(255,255,255,0.03)', border:`1px solid ${T.border}` }}>
+              <div style={{ display:'flex', gap:12, alignItems:'center' }}>
+                <div style={{ width:8, height:8, borderRadius:'50%', background: s.signal_state === 'LONG_NOW' ? T.green : T.red }}/>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14 }}>{s.symbol}</div>
+                  <div style={{ color:T.muted, fontSize:12 }}>{s.signal_state === 'LONG_NOW' ? 'LONG' : 'SHORT'} · {s.session_name || 'Unknown session'}</div>
+                </div>
+              </div>
+              <button onClick={() => {
+                LS.set('pendingSignal', { sym: s.symbol, dir: s.signal_state === 'LONG_NOW' ? 'LONG' : 'SHORT' });
+                onNavigate('analyze');
+              }} style={{ padding:'7px 14px', background:'rgba(255,255,255,0.05)', border:`1px solid ${T.border}`, borderRadius:8, color:T.sub, fontSize:12, fontWeight:600, cursor:'pointer' }}>
+                Validate →
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── TODAY'S SESSION SUMMARY ── */}
+      <div className="pp-panel" style={{ padding:20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+          <div style={{ fontWeight:700, fontSize:15 }}>Today's Session</div>
+          <button onClick={() => onNavigate('journal')} style={{ padding:'6px 14px', background:'rgba(255,255,255,0.04)', border:`1px solid ${T.border}`, borderRadius:8, color:T.sub, fontSize:12, cursor:'pointer' }}>
+            Open Journal →
+          </button>
+        </div>
+        {todayTrades.length === 0 ? (
+          <div style={{ textAlign:'center', padding:'32px 0', color:T.muted }}>
+            <div style={{ fontSize:36, marginBottom:10 }}>🌅</div>
+            <div style={{ fontSize:14, marginBottom:6 }}>No trades logged yet today.</div>
+            <div style={{ fontSize:12, color:T.muted, marginBottom:18 }}>Find a setup, validate it, then log the result.</div>
+            <button onClick={() => onNavigate('signals')} style={{ padding:'10px 22px', background:`linear-gradient(135deg,#6366F1,#4F46E5)`, border:'none', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+              ⚡ Find a Setup →
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ display:'flex', gap:24, marginBottom:14, flexWrap:'wrap' }}>
+              {[
+                { lbl:'Trades', val:todayTrades.length,                                 vc:T.text  },
+                { lbl:'Wins',   val:wins,                                                vc:T.green },
+                { lbl:'Losses', val:losses,                                              vc:T.red   },
+                { lbl:'Net P&L',val:`${todayPnl >= 0 ? '+' : ''}$${todayPnl}`,          vc:todayPnl >= 0 ? T.green : T.red },
+              ].map(s => (
+                <div key={s.lbl}>
+                  <div style={{ color:T.muted, fontSize:11 }}>{s.lbl}</div>
+                  <div style={{ color:s.vc, fontWeight:800, fontSize:20 }}>{s.val}</div>
+                </div>
+              ))}
+            </div>
+            {todayTrades.slice(0, 3).map(t => (
+              <div key={t.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'9px 12px', borderRadius:9, marginBottom:6, background:'rgba(255,255,255,0.03)', border:`1px solid ${T.border}` }}>
+                <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+                  <div style={{ width:7, height:7, borderRadius:'50%', background:t.win ? T.green : T.red }}/>
+                  <span style={{ fontWeight:700, fontSize:13 }}>{t.sym}</span>
+                  <span style={{ color:t.dir === 'LONG' ? T.green : T.red, fontSize:12, fontWeight:600 }}>{t.dir}</span>
+                </div>
+                <span style={{ color:t.pnl >= 0 ? T.green : T.red, fontWeight:800, fontSize:14 }}>{t.pnl >= 0 ? '+' : ''}${t.pnl}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── NO CHALLENGE SET ── */}
+      {!ch && (
+        <div style={{ textAlign:'center', padding:'36px 24px', background:'rgba(255,255,255,0.02)', border:`1px solid ${T.border}`, borderRadius:16 }}>
+          <div style={{ fontSize:44, marginBottom:14 }}>🎯</div>
+          <div style={{ fontWeight:800, fontSize:17, color:T.sub, marginBottom:8 }}>No challenge configured</div>
+          <div style={{ fontSize:13, color:T.muted, marginBottom:20, lineHeight:1.7 }}>
+            Set up your prop firm challenge to see daily limits, max drawdown buffer, and precise trade decisions.
+          </div>
+          <button onClick={() => onNavigate('challenge')} style={{ padding:'11px 26px', background:`linear-gradient(135deg,${T.amber},#D97706)`, border:'none', borderRadius:10, color:'#000', fontSize:13, fontWeight:800, cursor:'pointer' }}>
+            Set Up Challenge →
+          </button>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
 function ExecutiveDashboard({ data, phase }) {
   const { show: showToast } = useToast();
   const account       = data.account || {};
@@ -3958,7 +4357,7 @@ function OutcomeAnalyticsPanel({ data }) {
   );
 }
 
-function SignalsWorkspace() {
+function SignalsWorkspace({ onNavigate }) {
   const SYMS      = ['XAU/USD','EUR/USD','GBP/USD','NAS100','GBP/JPY'];
   const TFS       = [{ v:'15min', l:'15m' }, { v:'1h', l:'1h' }, { v:'4h', l:'4h' }];
   const DIRS      = ['AUTO','LONG','SHORT'];
@@ -4219,6 +4618,27 @@ function SignalsWorkspace() {
               accountBalance={100000}
             />
             <SignalNote signalId={`manual_${sym}_${tf}`}/>
+          </div>
+
+          {/* ── Workflow actions ── */}
+          <div style={{ display:'flex', gap:10, marginTop:14, flexWrap:'wrap' }}>
+            {onNavigate && (
+              <button onClick={() => {
+                LS.set('pendingSignal', {
+                  sym,
+                  dir:   result.direction,
+                  price: result.price,
+                  sl:    result.slNum,
+                  tp1:   result.tp1Num,
+                  tp2:   result.tp2Num,
+                  tf,
+                  confidence: result.confidence,
+                });
+                onNavigate('analyze');
+              }} style={{ flex:1, padding:'12px 0', background:`linear-gradient(135deg,#6366F1,#4F46E5)`, border:'none', borderRadius:10, color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+                ◬ Validate This Setup in Analyze →
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -4561,7 +4981,7 @@ function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState
 
   const phColors = { s1:'#3B82F6', s2:'#8B5CF6', fs:'#10B981', sw:'#F59E0B' };
   const screenLabels = {
-    dashboard:'Overview', signals:'Signals', analyze:'Analyze',
+    dashboard:'Today', signals:'Signals', analyze:'Analyze',
     journal:'Journal', risk:'Risk Calc', analytics:'Analytics',
     challenge:'Challenge', settings:'Settings',
   };
@@ -4953,7 +5373,7 @@ function AuthGate({ children }) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const TABS = [
-  { id:'dashboard', label:'Overview',  icon:'⊞' },
+  { id:'dashboard', label:'Today',     icon:'◈' },
   { id:'signals',   label:'Signals',   icon:'⚡' },
   { id:'analyze',   label:'Analyze',   icon:'◬' },
   { id:'journal',   label:'Journal',   icon:'▦' },
@@ -5070,9 +5490,9 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
         ) : (
           <>
             <TabBoundary key={screen}>
-              {screen === 'dashboard' && <ExecutiveDashboard data={appData} phase={phase}/>}
-              {screen === 'signals'   && <SignalsWorkspace/>}
-              {screen === 'analyze'   && <CheckTrade account={accountView} phase={phase}/>}
+              {screen === 'dashboard' && <TodayScreen data={appData} phase={phase} accountView={accountView} trades={trades} onNavigate={setScreen}/>}
+              {screen === 'signals'   && <SignalsWorkspace onNavigate={setScreen}/>}
+              {screen === 'analyze'   && <CheckTrade account={accountView} phase={phase} onNavigate={setScreen}/>}
               {screen === 'journal'   && <Journal trades={trades} setTrades={t => { setTrades(t); LS.set('trades', t); }}/>}
               {screen === 'risk'      && <RiskCalc account={accountView}/>}
               {screen === 'analytics' && <OutcomeAnalyticsPanel data={appData}/>}
