@@ -4492,79 +4492,275 @@ function SettingsWorkbench({ data, accountView, onUpdateAccount }) {
           4. Push notifications auto-fire on new signals, TP1/TP2 hit, SL hit, kill-switch
         </div>
       </div>
+
+      {/* ── Automation Status ─────────────────────────────────────── */}
+      <div className="pp-panel" style={{ padding:20 }}>
+        <div style={{ fontWeight:800, fontSize:16, marginBottom:16 }}>⚙ Automation Status</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3, minmax(0, 1fr))', gap:12 }}>
+          {[
+            { label:'Auto-Analyze', desc:'AI scans markets every session', status:'Cron · Supabase', ok:true,  action:'Run Now', onAction: async () => {
+              try {
+                const r = await fetch(`${SB_URL}/functions/v1/auto-analyze`, { method:'POST', headers:SB_JSON_HDR, body:'{}' });
+                const j = await r.json().catch(() => ({}));
+                alert(r.ok ? `Done: ${j.processed || 0} signals processed` : `Error: ${j.error || r.status}`);
+              } catch(e) { alert('Error: ' + e.message); }
+            }},
+            { label:'Paper Positions', desc:'Updates open trade prices every 30m', status:'Cron · Supabase', ok:true, action:null },
+            { label:'Outcome Tracking', desc:'Marks TP/SL hits automatically', status:'Cron · Supabase', ok:true, action:null },
+          ].map(({ label, desc, status, ok, action, onAction }) => (
+            <div key={label} className="pp-panel-solid" style={{ padding:16 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
+                <div style={{ fontWeight:700, fontSize:13 }}>{label}</div>
+                <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                  <span style={{ width:6, height:6, borderRadius:'50%', background: ok ? T.green : T.red, display:'inline-block', boxShadow: ok ? `0 0 6px ${T.green}` : 'none' }}/>
+                  <span style={{ fontSize:10, color: ok ? T.green : T.red, fontWeight:700 }}>{ok ? 'Active' : 'Off'}</span>
+                </div>
+              </div>
+              <div style={{ color:T.muted, fontSize:11, marginBottom:10 }}>{desc}</div>
+              <div style={{ color:T.sub, fontSize:10, fontFamily:'monospace', marginBottom: action ? 12 : 0 }}>{status}</div>
+              {action && <button className="pp-btn pp-btn-primary" onClick={onAction} style={{ width:'100%', fontSize:11 }}>{action}</button>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Danger zone ────────────────────────────────────────────── */}
+      <div className="pp-panel" style={{ padding:20, border:'1px solid rgba(239,68,68,0.2)', background:'rgba(239,68,68,0.04)' }}>
+        <div style={{ fontWeight:800, fontSize:14, color:T.red, marginBottom:12 }}>⚠ Danger Zone</div>
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+          <button className="pp-btn" style={{ borderColor:'rgba(239,68,68,0.4)', color:T.red }}
+            onClick={() => { if (window.confirm('Clear all local trade history? This cannot be undone.')) { LS.set('trades',[]); window.location.reload(); }}}>
+            Clear Trade History
+          </button>
+          <button className="pp-btn" style={{ borderColor:'rgba(239,68,68,0.4)', color:T.red }}
+            onClick={() => { if (window.confirm('Reset challenge progress?')) { LS.set('challenge', null); window.location.reload(); }}}>
+            Reset Challenge
+          </button>
+          <button className="pp-btn" style={{ borderColor:'rgba(239,68,68,0.4)', color:T.red }}
+            onClick={() => { if (window.confirm('Clear ALL local settings?')) { localStorage.clear(); window.location.reload(); }}}>
+            Factory Reset
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
-function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup, onNotif, notifPerm, user, onLogout }) {
-  const titles = {
-    dashboard: 'Overview',
-    signals:   'Signals',
-    analyze:   'Analyze Trade',
-    journal:   'Trade Journal',
-    risk:      'Risk Calculator',
-    analytics: 'Analytics',
-    challenge: 'Challenge',
-    settings:  'Settings',
-  };
+// ── Market session detector ──────────────────────────────────────────────
+function currentSession() {
+  const h = new Date().getUTCHours();
+  if (h >= 22 || h < 8)  return { name:'Asia',   color:'#06B6D4', active: h >= 23 || h < 7 };
+  if (h >= 7  && h < 9)  return { name:'Pre-London', color:'#94A3B8', active: false };
+  if (h >= 9  && h < 12) return { name:'London', color:'#3B82F6', active: true };
+  if (h >= 12 && h < 17) return { name:'London+NY', color:'#8B5CF6', active: true };
+  if (h >= 17 && h < 21) return { name:'NY',     color:'#10B981', active: true };
+  return { name:'Closed', color:'#4B5A72', active: false };
+}
+
+function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup, onNotif, notifPerm, user, onLogout, appData, gateData, trades }) {
 
   const phColors = { s1:'#3B82F6', s2:'#8B5CF6', fs:'#10B981', sw:'#F59E0B' };
+  const screenLabels = {
+    dashboard:'Overview', signals:'Signals', analyze:'Analyze',
+    journal:'Journal', risk:'Risk Calc', analytics:'Analytics',
+    challenge:'Challenge', settings:'Settings',
+  };
+
+  // ── Context chip — smart info per screen ────────────────────────────────
+  const ContextChip = () => {
+    // DASHBOARD: today's P&L
+    if (screen === 'dashboard') {
+      const pnl     = accountView.todayPnL || 0;
+      const size    = accountView.size || 100000;
+      const pnlPct  = size ? ((pnl / size) * 100).toFixed(2) : 0;
+      const color   = pnl > 0 ? T.green : pnl < 0 ? T.red : T.sub;
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10 }}>
+          <span style={{ fontSize:10, color:T.muted, fontWeight:700, letterSpacing:'.05em' }}>TODAY</span>
+          <span style={{ color, fontWeight:800, fontFamily:'monospace', fontSize:13 }}>{pnl >= 0 ? '+' : ''}{fmtUsd(pnl)}</span>
+          <span style={{ color, fontSize:10, fontWeight:700 }}>({pnl >= 0 ? '+' : ''}{pnlPct}%)</span>
+        </div>
+      );
+    }
+
+    // SIGNALS: market session
+    if (screen === 'signals') {
+      const sess = currentSession();
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:7, padding:'4px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10 }}>
+          <span style={{ width:7, height:7, borderRadius:'50%', background: sess.color, display:'inline-block', boxShadow: sess.active ? `0 0 8px ${sess.color}` : 'none', flexShrink:0 }}/>
+          <span style={{ fontSize:11, fontWeight:800, color: sess.active ? sess.color : T.sub }}>{sess.name} Session</span>
+          <span style={{ fontSize:10, color:T.muted }}>{sess.active ? 'Open' : 'Closed'}</span>
+        </div>
+      );
+    }
+
+    // JOURNAL: stats summary
+    if (screen === 'journal') {
+      const t = trades || [];
+      const wins    = t.filter(x => x.win).length;
+      const wr      = t.length ? Math.round(wins/t.length*100) : 0;
+      const totalPnl= t.reduce((s,x) => s + (x.pnl||0), 0);
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'4px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10 }}>
+          <span style={{ fontSize:10, color:T.muted, fontWeight:700 }}>{t.length} TRADES</span>
+          <span style={{ color: wr >= 50 ? T.green : T.red, fontWeight:800, fontSize:12 }}>WR {wr}%</span>
+          <span style={{ color: totalPnl >= 0 ? T.green : T.red, fontWeight:700, fontFamily:'monospace', fontSize:12 }}>{totalPnl >= 0 ? '+' : ''}{fmtUsd(totalPnl)}</span>
+        </div>
+      );
+    }
+
+    // RISK: daily limit remaining
+    if (screen === 'risk') {
+      const ch = LS.get('challenge', null);
+      const chFirm = ch ? PROP_FIRMS[ch.firmId] : null;
+      const chType = (chFirm && ch?.typeId) ? chFirm.types[ch.typeId] : null;
+      const phIdx  = ch?.curPhaseIdx ?? 0;
+      const phaseName = chType ? chType.phases[phIdx] : null;
+      const rules  = (phaseName && chType) ? chType.rules[phaseName] : null;
+      const size   = ch?.size || accountView.size || 100000;
+      const dailyLim = rules?.daily ? size * rules.daily : null;
+      const todayPnl = (LS.get('trades', []))
+        .filter(t => t.date === new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short' }))
+        .reduce((s,t) => s + (t.pnl||0), 0);
+      const remaining = dailyLim ? Math.max(0, dailyLim + Math.min(0, todayPnl)) : null;
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'4px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10 }}>
+          <span style={{ fontSize:10, color:T.muted, fontWeight:700 }}>DAILY LIMIT</span>
+          {dailyLim
+            ? <><span style={{ color:T.amber, fontWeight:800, fontFamily:'monospace', fontSize:12 }}>{fmtUsd(dailyLim)}</span>
+                <span style={{ color:T.muted, fontSize:10 }}>Left:</span>
+                <span style={{ color: remaining > 0 ? T.green : T.red, fontWeight:800, fontFamily:'monospace', fontSize:12 }}>{fmtUsd(remaining)}</span></>
+            : <span style={{ color:T.muted, fontSize:11 }}>Set up challenge first</span>
+          }
+        </div>
+      );
+    }
+
+    // CHALLENGE: gate progress
+    if (screen === 'challenge') {
+      const g       = gateData || {};
+      const tot     = g.totalTrades || 0;
+      const pf      = g.profitFactor || 0;
+      const dd      = g.maxDD || 0;
+      const pfOk    = pf >= 1.2;
+      const ddOk    = dd <= 15;
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'4px 14px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10 }}>
+          <span style={{ fontSize:9, color:T.muted, fontWeight:800, letterSpacing:'.06em' }}>GATE</span>
+          {[
+            { label:'Trades', val:`${tot}/100`, ok: tot >= 100 },
+            { label:'PF', val:pf.toFixed(2), ok: pfOk },
+            { label:'MaxDD', val:`${dd.toFixed(1)}%`, ok: ddOk },
+          ].map(({ label, val, ok }) => (
+            <div key={label} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2 }}>
+              <span style={{ fontSize:9, color:T.muted }}>{label}</span>
+              <span style={{ fontSize:11, fontWeight:800, color: ok ? T.green : T.amber, fontFamily:'monospace' }}>{val}</span>
+            </div>
+          ))}
+          {tot >= 100 && pfOk && ddOk && <span style={{ fontSize:11, color:T.green, fontWeight:900 }}>🔓 PASS</span>}
+        </div>
+      );
+    }
+
+    // ANALYTICS: open P&L
+    if (screen === 'analytics') {
+      const sigs    = (appData?.signals || []).filter(s => s.outcome === 'OPEN');
+      const resolved= (appData?.signals || []).filter(s => s.outcome !== 'OPEN');
+      const wins    = resolved.filter(s => ['TP1_HIT','TP2_HIT'].includes(s.outcome)).length;
+      const wr      = resolved.length ? Math.round(wins/resolved.length*100) : 0;
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'4px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10 }}>
+          <span style={{ fontSize:10, color:T.muted, fontWeight:700 }}>{resolved.length} RESOLVED</span>
+          <span style={{ color: wr >= 50 ? T.green : T.red, fontWeight:800, fontSize:12 }}>WR {wr}%</span>
+          <span style={{ fontSize:10, color:T.muted }}>{sigs.length} open</span>
+        </div>
+      );
+    }
+
+    // SETTINGS: bot + telegram status
+    if (screen === 'settings') {
+      const hasTg = !!(LS.get('tg_token','') && LS.get('tg_chat_id',''));
+      const riskPct = appData?.settings?.risk_pct;
+      return (
+        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'4px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10 }}>
+          <span style={{ fontSize:10, color:T.muted, fontWeight:700 }}>RISK</span>
+          <span style={{ color:T.indigo, fontWeight:800, fontFamily:'monospace', fontSize:12 }}>{riskPct != null ? `${riskPct}%/trade` : '—'}</span>
+          <span style={{ width:1, height:12, background:T.border, display:'inline-block' }}/>
+          <span style={{ fontSize:10, color:T.muted }}>TG:</span>
+          <span style={{ color: hasTg ? T.green : T.muted, fontWeight:700, fontSize:11 }}>{hasTg ? 'Connected' : 'Off'}</span>
+        </div>
+      );
+    }
+
+    // ANALYZE: instrument hint
+    return (
+      <div style={{ display:'flex', alignItems:'center', gap:8, padding:'4px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:10 }}>
+        <span style={{ fontSize:11, color:T.sub }}>Pick instrument + direction below</span>
+      </div>
+    );
+  };
 
   return (
     <div className="pp-topbar">
       <div className="pp-topbar-inner">
-        {/* Brand */}
+
+        {/* Left: Brand + screen label */}
         <div style={{ display:'flex', alignItems:'center', gap:10, flexShrink:0 }}>
           <div className="pp-brand-mark">P</div>
           <div>
-            <div style={{ fontWeight:900, fontSize:15, letterSpacing:'-.03em', lineHeight:1.2 }}>
+            <div style={{ fontWeight:900, fontSize:15, letterSpacing:'-.03em', lineHeight:1.15 }}>
               PropPilot <span style={{ color:T.indigo }}>AI</span>
             </div>
-            <div style={{ color:T.muted, fontSize:10, fontWeight:600, letterSpacing:'.04em' }}>
-              {titles[screen] || 'Dashboard'}
+            <div style={{ color:T.muted, fontSize:9, fontWeight:700, letterSpacing:'.08em', textTransform:'uppercase' }}>
+              {screenLabels[screen] || 'Dashboard'}
             </div>
           </div>
         </div>
 
-        {/* Center: phase selector + account pill */}
-        <div style={{ display:'flex', alignItems:'center', gap:8, flex:1, justifyContent:'center', flexWrap:'wrap' }}>
+        {/* Center: phase pills + context chip */}
+        <div style={{ display:'flex', alignItems:'center', gap:8, flex:1, justifyContent:'center', flexWrap:'wrap', overflow:'hidden' }}>
+
           {/* Phase pills */}
-          <div style={{ display:'flex', alignItems:'center', gap:3, background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)', borderRadius:10, padding:'3px 4px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:2, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:9, padding:'2px 3px', flexShrink:0 }}>
             {Object.entries(PHASES).map(([id, p]) => (
-              <button key={id} onClick={() => onPhaseChange?.(id)} style={{
-                padding:'3px 9px', border:'none', borderRadius:7, cursor:'pointer', fontWeight:800,
+              <button key={id} onClick={() => onPhaseChange?.(id)} title={p.label} style={{
+                padding:'3px 8px', border:'none', borderRadius:7, cursor:'pointer', fontWeight:800,
                 fontSize:10, letterSpacing:'.04em', transition:'all .15s',
-                background: phase === id ? `${phColors[id]}22` : 'transparent',
+                background: phase === id ? `${phColors[id]}25` : 'transparent',
                 color: phase === id ? phColors[id] : T.muted,
-                outline: phase === id ? `1px solid ${phColors[id]}44` : 'none',
+                outline: phase === id ? `1px solid ${phColors[id]}50` : 'none',
               }}>{p.tag}</button>
             ))}
           </div>
 
           {/* Account chip */}
-          <div className="pp-status-pill" style={{ gap:6 }}>
-            <span style={{ color:T.text, fontWeight:700, fontSize:11 }}>{accountView.firm}</span>
-            <span style={{ color:T.sub }}>·</span>
-            <span style={{ color:T.indigo, fontWeight:700, fontFamily:'monospace', fontSize:11 }}>{fmtUsd(accountView.size || 100000)}</span>
+          <div className="pp-status-pill" style={{ gap:5, flexShrink:0 }}>
+            <span style={{ color:T.text, fontWeight:700, fontSize:11 }}>{accountView.firm || 'FTMO'}</span>
+            <span style={{ color:T.border }}>·</span>
+            <span style={{ color:T.indigo, fontWeight:800, fontFamily:'monospace', fontSize:11 }}>{fmtUsd(accountView.size || 100000)}</span>
           </div>
+
+          {/* Smart context chip */}
+          <ContextChip/>
         </div>
 
         {/* Right: actions */}
-        <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:5, flexShrink:0 }}>
           <SyncPill syncState={syncState} rtStatus={rtStatus} lastLoadAt={lastLoadAt}/>
           {onNotif && (
             <button className="pp-btn" onClick={onNotif}
               title={notifPerm === 'granted' ? 'Notifications on' : 'Enable notifications'}
-              style={{ padding:'7px 9px', fontSize:14, color: notifPerm === 'granted' ? T.green : undefined }}>
+              style={{ padding:'6px 8px', fontSize:13, color: notifPerm === 'granted' ? T.green : T.muted }}>
               {notifPerm === 'granted' ? '🔔' : '🔕'}
             </button>
           )}
-          <button className="pp-btn" onClick={() => onRefresh('updating')} title="Refresh" style={{ padding:'7px 9px' }}>↻</button>
-          <button className="pp-btn pp-btn-primary" onClick={onSetup} style={{ fontSize:12 }}>⚙ Account</button>
+          <button className="pp-btn" onClick={() => onRefresh('updating')} title="Refresh" style={{ padding:'6px 9px' }}>↻</button>
+          <button className="pp-btn pp-btn-primary" onClick={onSetup} style={{ fontSize:11, padding:'7px 12px' }}>⚙ Account</button>
           {onLogout && (
             <button className="pp-btn" onClick={onLogout}
               title={user?.email ? `Sign out — ${user.email}` : 'Sign out'}
-              style={{ padding:'7px 9px', color:T.muted }}>↩</button>
+              style={{ padding:'6px 8px', color:T.muted, fontSize:13 }}>↩</button>
           )}
         </div>
       </div>
@@ -4856,6 +5052,9 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
         notifPerm={notifPerm}
         user={user}
         onLogout={onLogout}
+        appData={appData}
+        gateData={gateData}
+        trades={trades}
         onNotif={async () => {
           const p = await pushMgr?.requestPermission();
           setNotifPerm(p || 'unsupported');
