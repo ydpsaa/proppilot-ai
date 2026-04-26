@@ -6,3 +6,5 @@ dist/
 .DS_Store
 daemon/.env
 daemon/__pycache__/
+.claude/
+proppilot-ai/
