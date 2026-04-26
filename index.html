@@ -643,7 +643,9 @@ const sbClient = (() => {
   try { return window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null; }
   catch (e) { console.warn('Supabase client unavailable', e); return null; }
 })();
-const TD_KEY = '552e649e1b1f4bba97d590c37e981118';
+// TwelveData key — uses user's own key if set in Settings (td_key_custom), else shared fallback
+const TD_KEY_DEFAULT = '552e649e1b1f4bba97d590c37e981118';
+const TD_KEY = (() => { try { return localStorage.getItem('td_key_custom') || TD_KEY_DEFAULT; } catch { return TD_KEY_DEFAULT; } })();
 const VERDICT_LABEL = { 'LONG_NOW':'LONG','SHORT_NOW':'SHORT','WAIT_LONG':'WAIT','WAIT_SHORT':'WAIT','NO_TRADE':'NO TRADE' };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2017,6 +2019,32 @@ function ChallengeMode({ account, phase, userId }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TECHNICAL ANALYSIS ENGINE (inline, no deps)
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ── Demo OHLCV generator — realistic synthetic data when API unavailable ──
+const DEMO_PRICE_BASE = {
+  'XAU/USD': 3320, 'EUR/USD': 1.0985, 'GBP/USD': 1.2750,
+  'NAS100': 18200, 'GBP/JPY': 191.5, 'USD/JPY': 150.2,
+};
+function _generateDemoOHLCV(sym, bars = 200) {
+  const base = DEMO_PRICE_BASE[sym] || 1.0;
+  const volatility = base * 0.002; // 0.2% per bar
+  const candles = [];
+  let price = base * (0.98 + Math.random() * 0.04);
+  // Inject a mild trend so EMA signals are interesting
+  const trendDir = Math.random() > 0.5 ? 1 : -1;
+  for (let i = 0; i < bars; i++) {
+    const trend = trendDir * volatility * 0.15;
+    const move = (Math.random() - 0.48) * volatility + trend;
+    price = Math.max(base * 0.9, price + move);
+    const range = volatility * (0.5 + Math.random() * 1.5);
+    const o = price - move * 0.5;
+    const h = Math.max(o, price) + Math.random() * range * 0.5;
+    const l = Math.min(o, price) - Math.random() * range * 0.5;
+    const ts = new Date(Date.now() - (bars - i) * 3600000).toISOString().slice(0, 16).replace('T', ' ');
+    candles.push({ v: price, h, l, o, t: ts });
+  }
+  return candles;
+}
 
 function _ema(arr, p) {
   const k = 2/(p+1); let r = arr[0];
@@ -3768,7 +3796,7 @@ function LivePriceTicker() {
 
   useEffect(() => {
     fetchPrices();
-    const id = setInterval(fetchPrices, 60000);
+    const id = setInterval(fetchPrices, 300000); // 5 min — preserve API quota (800 req/day free)
     return () => clearInterval(id);
   }, [fetchPrices]);
 
@@ -4529,27 +4557,55 @@ function SignalsWorkspace({ onNavigate }) {
   const [candles, setCandles] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error,  setError]  = useState(null);
+  const [demoMode, setDemoMode] = useState(false);
 
   const runAnalysis = async () => {
     setLoading(true);
     setError(null);
+    setDemoMode(false);
+
+    // Try cache first (per symbol+tf, valid 15 min)
+    const CACHE_KEY = `ohlcv_${sym}_${tf}`;
+    const cached = LS.get(CACHE_KEY, null);
+
+    let cvt = null;
+
+    // Try live API
     try {
       const enc = encodeURIComponent(sym);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
       const r = await fetch(
-        `https://api.twelvedata.com/time_series?symbol=${enc}&interval=${tf}&outputsize=200&apikey=${TD_KEY}`
+        `https://api.twelvedata.com/time_series?symbol=${enc}&interval=${tf}&outputsize=200&apikey=${TD_KEY}`,
+        { signal: controller.signal }
       );
+      clearTimeout(timeout);
       const json = await r.json();
-      if (!json.values?.length) throw new Error(json.message || 'No data returned');
+      if (json.values?.length) {
+        cvt = json.values.slice().reverse().map(v => ({
+          v: parseFloat(v.close), h: parseFloat(v.high),
+          l: parseFloat(v.low),  o: parseFloat(v.open), t: v.datetime,
+        }));
+        // Cache successful fetch
+        LS.set(CACHE_KEY, { data: cvt, ts: Date.now() });
+      } else {
+        throw new Error(json.message || 'No data');
+      }
+    } catch (apiErr) {
+      // Fallback: use cached data if < 4 hours old
+      if (cached && (Date.now() - cached.ts) < 4 * 3600000) {
+        cvt = cached.data;
+        setError(`📡 API unavailable — showing cached data from ${Math.round((Date.now()-cached.ts)/60000)}m ago`);
+        setDemoMode(true);
+      } else {
+        // Final fallback: synthetic OHLCV
+        cvt = _generateDemoOHLCV(sym, 200);
+        setError('📡 API limit reached — running on demo prices. Real patterns, synthetic data.');
+        setDemoMode(true);
+      }
+    }
 
-      // Convert TwelveData → candle format
-      const cvt = json.values.slice().reverse().map(v => ({
-        v: parseFloat(v.close),
-        h: parseFloat(v.high),
-        l: parseFloat(v.low),
-        o: parseFloat(v.open),
-        t: v.datetime,
-      }));
-      setCandles(cvt);
+    setCandles(cvt);
 
       const closes     = cvt.map(c => c.v);
       const price      = closes[closes.length - 1];
@@ -4659,9 +4715,10 @@ function SignalsWorkspace({ onNavigate }) {
 
         {error && (
           <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8,
-            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
-            color: T.red, fontSize: 12 }}>
-            ⚠ {error}
+            background: demoMode ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)',
+            border: `1px solid ${demoMode ? 'rgba(245,158,11,0.3)' : 'rgba(239,68,68,0.2)'}`,
+            color: demoMode ? T.amber : T.red, fontSize: 12 }}>
+            {error}
           </div>
         )}
       </div>
@@ -4669,6 +4726,14 @@ function SignalsWorkspace({ onNavigate }) {
       {/* ── Result ── */}
       {result && (
         <div className="pp-panel" style={{ padding: 22 }}>
+
+          {demoMode && (
+            <div style={{ marginBottom: 14, padding: '8px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', display:'flex', alignItems:'center', gap: 10 }}>
+              <span style={{ fontSize: 14 }}>🔶</span>
+              <span style={{ color: T.amber, fontSize: 12, fontWeight: 700 }}>DEMO MODE</span>
+              <span style={{ color: T.sub, fontSize: 12 }}>— TA analysis is real, price data is synthetic. Add your own TwelveData key in Settings for live prices.</span>
+            </div>
+          )}
 
           {/* Header row */}
           <div style={{ display:'flex', gap: 20, alignItems:'flex-start', flexWrap:'wrap', marginBottom: 18 }}>
@@ -4897,6 +4962,7 @@ function SettingsWorkbench({ data, accountView, onUpdateAccount, plan }) {
 
   const [showUpgrade, setShowUpgrade] = useState(false);
   const currentPlan = plan || 'free';
+  const [tdKey, setTdKey] = useState(() => LS.get('td_key_custom', ''));
   const planMeta = PLAN_META[currentPlan] || PLAN_META.free;
 
   return (
@@ -5027,6 +5093,35 @@ function SettingsWorkbench({ data, accountView, onUpdateAccount, plan }) {
         ) : (
           <div style={{ color:T.muted, fontSize:13 }}>Loading settings...</div>
         )}
+      </div>
+
+      {/* ── TwelveData API Key ──────────────────────────────────────────── */}
+      <div className="pp-panel" style={{ padding: 20 }}>
+        <div style={{ fontWeight:800, fontSize:16, marginBottom:6 }}>📡 Market Data API Key</div>
+        <div style={{ color:T.sub, fontSize:13, marginBottom:16, lineHeight:1.6 }}>
+          TwelveData provides live OHLCV for Signals & Analyze. Free plan = 800 requests/day.{' '}
+          <a href="https://twelvedata.com" target="_blank" rel="noreferrer" style={{ color:T.indigo }}>Get a free key →</a>
+        </div>
+        <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+          <input
+            type="text"
+            value={tdKey}
+            onChange={e => setTdKey(e.target.value)}
+            placeholder="Paste your TwelveData API key here…"
+            style={{ flex:1, minWidth:260, padding:'10px 14px', background:'rgba(255,255,255,0.06)', border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, outline:'none' }}
+          />
+          <button onClick={() => { LS.set('td_key_custom', tdKey); window.location.reload(); }}
+            style={{ padding:'10px 20px', background:`linear-gradient(135deg,${T.indigo},#4F46E5)`, border:'none', borderRadius:8, color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+            Save & Reload
+          </button>
+          {tdKey && <button onClick={() => { setTdKey(''); LS.set('td_key_custom', ''); window.location.reload(); }}
+            style={{ padding:'10px 14px', background:'transparent', border:`1px solid ${T.border}`, borderRadius:8, color:T.muted, fontSize:13, cursor:'pointer' }}>
+            Reset to default
+          </button>}
+        </div>
+        <div style={{ marginTop:12, padding:'8px 12px', borderRadius:8, background:'rgba(255,255,255,0.03)', fontSize:12, color:T.muted }}>
+          Active key: <span style={{ color:tdKey ? T.green : T.amber, fontWeight:700 }}>{tdKey ? `${tdKey.slice(0,8)}…` : 'Shared default (may be rate-limited)'}</span>
+        </div>
       </div>
 
       {/* ── Telegram Integration ─────────────────────────────────────── */}
