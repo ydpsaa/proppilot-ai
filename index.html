@@ -643,9 +643,34 @@ const sbClient = (() => {
   try { return window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null; }
   catch (e) { console.warn('Supabase client unavailable', e); return null; }
 })();
-// TwelveData key — uses user's own key if set in Settings (td_key_custom), else shared fallback
+// Market data — Supabase Edge Function proxying Yahoo Finance (free, no key, no limit)
+// Falls back to TwelveData if user has their own key saved
+const MD_URL = `${SB_URL}/functions/v1/market-data`;
 const TD_KEY_DEFAULT = '552e649e1b1f4bba97d590c37e981118';
 const TD_KEY = (() => { try { return localStorage.getItem('td_key_custom') || TD_KEY_DEFAULT; } catch { return TD_KEY_DEFAULT; } })();
+// Helper: fetch OHLCV via market-data Edge Function (Yahoo Finance)
+async function mdFetchOHLCV(sym, interval = '1h', bars = 200) {
+  const enc = encodeURIComponent(sym);
+  const r = await fetch(`${MD_URL}?type=ohlcv&symbol=${enc}&interval=${interval}&bars=${bars}`, {
+    headers: { 'apikey': SB_KEY },
+  });
+  if (!r.ok) throw new Error(`market-data HTTP ${r.status}`);
+  const json = await r.json();
+  if (json.error) throw new Error(json.error);
+  // Already in {v,h,l,o,t} format
+  return json.candles;
+}
+// Helper: fetch live prices via market-data Edge Function
+async function mdFetchPrices(syms) {
+  const enc = syms.map(s => encodeURIComponent(s)).join(',');
+  const r = await fetch(`${MD_URL}?type=price&symbol=${enc}`, {
+    headers: { 'apikey': SB_KEY },
+  });
+  if (!r.ok) throw new Error(`market-data HTTP ${r.status}`);
+  const json = await r.json();
+  if (json.error) throw new Error(json.error);
+  return json.prices; // { 'XAU/USD': 3320.5, ... }
+}
 const VERDICT_LABEL = { 'LONG_NOW':'LONG','SHORT_NOW':'SHORT','WAIT_LONG':'WAIT','WAIT_SHORT':'WAIT','NO_TRADE':'NO TRADE' };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1245,21 +1270,16 @@ function Dashboard({ account, phase }) {
 
   const fetchCandles = useCallback(async () => {
     try {
-      const r = await fetch(`https://api.twelvedata.com/time_series?symbol=XAU%2FUSD&interval=1h&outputsize=50&apikey=${TD_KEY}`);
-      const d = await r.json();
-      if (d.values?.length) {
-        setCandles(d.values.slice().reverse().map(v => ({ t: v.datetime.slice(11,16), v: parseFloat(v.close) })));
-      }
+      const cvt = await mdFetchOHLCV('XAU/USD', '1h', 50);
+      setCandles(cvt.map(c => ({ t: (c.t || '').slice(11, 16), v: c.v })));
     } catch {}
   }, []);
 
   const fetchPrices = useCallback(async () => {
     try {
-      const r = await fetch(`https://api.twelvedata.com/price?symbol=XAU%2FUSD%2CEUR%2FUSD%2CGBP%2FUSD%2CUSD%2FJPY&apikey=${TD_KEY}`);
-      const d = await r.json();
-      const pm = {};
-      for (const [k, v] of Object.entries(d)) { if (v?.price) pm[k] = parseFloat(v.price); }
-      if (Object.keys(pm).length) setPrices(pm);
+      const pm = await mdFetchPrices(['XAU/USD','EUR/USD','GBP/USD','USD/JPY']);
+      const valid = Object.fromEntries(Object.entries(pm).filter(([,v]) => v != null));
+      if (Object.keys(valid).length) setPrices(valid);
     } catch {}
   }, []);
 
@@ -3773,17 +3793,11 @@ function LivePriceTicker() {
 
   const fetchPrices = useCallback(async () => {
     try {
-      const syms = PAIRS.map(p => encodeURIComponent(p.sym)).join(',');
-      const r = await fetch(
-        `https://api.twelvedata.com/price?symbol=${syms}&apikey=${TD_KEY}`
-      );
-      const json = await r.json();
+      const syms = PAIRS.map(p => p.sym);
+      const priceMap = await mdFetchPrices(syms);
       setPrev(prev => ({ ...prev, ...prices }));
       const next = {};
-      PAIRS.forEach(p => {
-        const raw = json[p.sym]?.price ?? json[p.sym];
-        if (raw) next[p.sym] = parseFloat(raw);
-      });
+      PAIRS.forEach(p => { if (priceMap[p.sym] != null) next[p.sym] = priceMap[p.sym]; });
       if (Object.keys(next).length) {
         setPrices(next);
         setTs(new Date());
@@ -4570,27 +4584,11 @@ function SignalsWorkspace({ onNavigate }) {
 
     let cvt = null;
 
-    // Try live API
+    // Try live API — Yahoo Finance via market-data Edge Function (free, no limit)
     try {
-      const enc = encodeURIComponent(sym);
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      const r = await fetch(
-        `https://api.twelvedata.com/time_series?symbol=${enc}&interval=${tf}&outputsize=200&apikey=${TD_KEY}`,
-        { signal: controller.signal }
-      );
-      clearTimeout(timeout);
-      const json = await r.json();
-      if (json.values?.length) {
-        cvt = json.values.slice().reverse().map(v => ({
-          v: parseFloat(v.close), h: parseFloat(v.high),
-          l: parseFloat(v.low),  o: parseFloat(v.open), t: v.datetime,
-        }));
-        // Cache successful fetch
-        LS.set(CACHE_KEY, { data: cvt, ts: Date.now() });
-      } else {
-        throw new Error(json.message || 'No data');
-      }
+      cvt = await mdFetchOHLCV(sym, tf, 200);
+      // Cache successful fetch
+      LS.set(CACHE_KEY, { data: cvt, ts: Date.now() });
     } catch (apiErr) {
       // Fallback: use cached data if < 4 hours old
       if (cached && (Date.now() - cached.ts) < 4 * 3600000) {
