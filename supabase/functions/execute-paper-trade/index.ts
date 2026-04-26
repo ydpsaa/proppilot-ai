@@ -89,12 +89,34 @@ async function reject(
   );
 }
 
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, 'Content-Type': 'application/json' },
+  });
+}
+
+async function authorizeAction(req: Request): Promise<Response | null> {
+  const cronSecret = Deno.env.get('PROPILOT_CRON_SECRET') || Deno.env.get('APP_CRON_SECRET') || '';
+  if (cronSecret && req.headers.get('x-proppilot-cron-secret') === cronSecret) return null;
+
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return json({ error: 'Unauthorized' }, 401);
+  if (token === SB_SKEY) return null;
+
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data.user) return json({ error: 'Unauthorized' }, 401);
+  return null;
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS });
   }
+  const authError = await authorizeAction(req);
+  if (authError) return authError;
 
   const startMs = Date.now();
   let body: Record<string, unknown>;

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PropPilot AI">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#14B8A6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="#05070f"/>
+  <rect x="32" y="32" width="448" height="448" rx="80" fill="url(#g)"/>
+  <path d="M156 372V138h122c55 0 92 34 92 83 0 50-37 84-92 84h-58v67h-64Zm64-121h51c22 0 35-11 35-30s-13-30-35-30h-51v60Z" fill="white"/>
+  <path d="M342 372h-56l82-234h60l82 234h-58l-14-46h-82l-14 46Zm27-89h56l-28-91-28 91Z" fill="white" opacity=".92"/>
+</svg>

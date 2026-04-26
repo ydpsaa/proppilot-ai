@@ -41,6 +41,19 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+async function authorizeAction(req: Request): Promise<Response | null> {
+  const cronSecret = Deno.env.get('PROPILOT_CRON_SECRET') || Deno.env.get('APP_CRON_SECRET') || '';
+  if (cronSecret && req.headers.get('x-proppilot-cron-secret') === cronSecret) return null;
+
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return json({ error: 'Unauthorized' }, 401);
+  if (token === SB_SERVICE_KEY) return null;
+
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data.user) return json({ error: 'Unauthorized' }, 401);
+  return null;
+}
+
 function n(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -191,6 +204,8 @@ function buildStatRows(groups: Group[], calculatedAt: string) {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  const authError = await authorizeAction(req);
+  if (authError) return authError;
 
   const started = Date.now();
   try {

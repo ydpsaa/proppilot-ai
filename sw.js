@@ -1,13 +1,11 @@
-// PropPilot AI — Service Worker v1.0
-const CACHE = 'proppilot-v1';
+// PropPilot AI — Service Worker v2.0
+const CACHE = 'proppilot-v2';
 const STATIC = [
   '/',
   '/index.html',
-  '/analytics.html',
-  '/signal.html',
   '/roadmap.html',
-  '/bot.html',
   '/manifest.json',
+  '/icon.svg',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap',
 ];
 
@@ -35,14 +33,28 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
-  // Skip Supabase API, TwelveData, Groq — always network
+  // Skip APIs — always network
   if (url.hostname.includes('supabase.co') ||
-      url.hostname.includes('twelvedata.com') ||
+      url.hostname.includes('query1.finance.yahoo.com') ||
       url.hostname.includes('groq.com')) {
     return; // fall through to network
   }
 
-  // Cache-first for HTML/CSS/JS
+  // HTML should update immediately after deploy.
+  if (e.request.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname === '/') {
+    e.respondWith(
+      fetch(e.request).then(res => {
+        if (res && res.status === 200 && e.request.method === 'GET') {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});
+        }
+        return res;
+      }).catch(() => caches.match(e.request).then(cached => cached || caches.match('/index.html')))
+    );
+    return;
+  }
+
+  // Cache-first for static assets
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
@@ -64,8 +76,8 @@ self.addEventListener('push', e => {
   e.waitUntil(
     self.registration.showNotification(data.title || 'PropPilot AI', {
       body: data.body || 'New signal update',
-      icon: '/manifest.json',
-      badge: '/manifest.json',
+      icon: '/icon.svg',
+      badge: '/icon.svg',
       tag: data.tag || 'proppilot',
       requireInteraction: data.requireInteraction || false,
       data: { url: data.url || '/index.html' },

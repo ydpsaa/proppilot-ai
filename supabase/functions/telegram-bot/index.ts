@@ -110,7 +110,7 @@ async function notifyOutcome(signal: Record<string, unknown>, chatId?: string) {
     `${dirEmoji(dir)}`,
     pnlR   != null ? `P&L: <b>${fmtR(pnlR)}</b>  (${fmtUsd(pnlUsd)})` : null,
     ``,
-    `<a href="https://proppilot-ai.vercel.app/analytics.html">View Analytics →</a>`,
+    `<a href="https://proppilot-ai.vercel.app/index.html#analytics">View Analytics →</a>`,
   ].filter(Boolean).join('\n');
 
   await sendMessage(id, msg);
