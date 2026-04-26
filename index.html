@@ -2851,7 +2851,207 @@ function EquityCurve({ trades }) {
   );
 }
 
+// ── Journal Analytics sub-tab ────────────────────────────────────────────────
+function JournalAnalytics({ trades }) {
+  if (trades.length === 0) {
+    return (
+      <div style={{ textAlign:'center', padding:'60px 24px', color:T.muted }}>
+        <div style={{ fontSize:40, marginBottom:14 }}>▦</div>
+        <div style={{ fontWeight:800, fontSize:16, color:T.sub, marginBottom:8 }}>No trades logged yet</div>
+        <div style={{ fontSize:13 }}>Log at least one trade to see analytics.</div>
+      </div>
+    );
+  }
+
+  // ── Compute win-rate by symbol
+  const bySymbol = {};
+  trades.forEach(t => {
+    if (!bySymbol[t.sym]) bySymbol[t.sym] = { w:0, l:0 };
+    t.win ? bySymbol[t.sym].w++ : bySymbol[t.sym].l++;
+  });
+  const symRows = Object.entries(bySymbol).map(([sym, v]) => {
+    const total = v.w + v.l;
+    return { sym, total, wr: total ? (v.w/total)*100 : 0 };
+  }).sort((a,b) => b.wr - a.wr);
+
+  // ── Win-rate by direction
+  const byDir = { LONG:{ w:0,l:0 }, SHORT:{ w:0,l:0 } };
+  trades.forEach(t => {
+    const d = t.dir || (t.win ? 'LONG' : 'SHORT');
+    if (byDir[d]) { t.win ? byDir[d].w++ : byDir[d].l++; }
+  });
+  const dirWR = (d) => { const v = byDir[d]; const tot = v.w+v.l; return tot ? (v.w/tot*100) : 0; };
+
+  // ── P&L by day of week
+  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const byDow = [0,1,2,3,4,5,6].map(() => ({ pnl:0, count:0 }));
+  trades.forEach(t => {
+    if (!t.date) return;
+    // t.date format: "16 Apr"
+    try {
+      const d = new Date(t.date + ' ' + new Date().getFullYear());
+      if (!isNaN(d)) { byDow[d.getDay()].pnl += (t.pnl||0); byDow[d.getDay()].count++; }
+    } catch {}
+  });
+
+  // ── Score distribution buckets (0-25, 26-50, 51-75, 76-100)
+  const scoreBuckets = [
+    { lbl:'0–25',  min:0,  max:25 },
+    { lbl:'26–50', min:26, max:50 },
+    { lbl:'51–75', min:51, max:75 },
+    { lbl:'76–100',min:76, max:100 },
+  ].map(b => {
+    const inRange = trades.filter(t => t.score >= b.min && t.score <= b.max);
+    const wins = inRange.filter(t => t.win).length;
+    return { ...b, count: inRange.length, wr: inRange.length ? (wins/inRange.length)*100 : 0 };
+  });
+
+  // ── Best & worst trades
+  const sorted = [...trades].sort((a,b) => b.pnl - a.pnl);
+  const best  = sorted[0];
+  const worst = sorted[sorted.length-1];
+
+  // ── Monthly P&L (last 6 months grouping)
+  const byMonth = {};
+  trades.forEach(t => {
+    if (!t.date) return;
+    try {
+      const d = new Date(t.date + ' ' + new Date().getFullYear());
+      if (!isNaN(d)) {
+        const key = d.toLocaleDateString('en-GB', { month:'short', year:'2-digit' });
+        byMonth[key] = (byMonth[key] || 0) + (t.pnl || 0);
+      }
+    } catch {}
+  });
+  const monthRows = Object.entries(byMonth).slice(-6);
+
+  return (
+    <div className="pp-grid" style={{ gap:18 }}>
+
+      {/* ── Top KPIs ── */}
+      <div className="pp-grid pp-grid-4x">
+        {[
+          { lbl:'Best Symbol', val: symRows[0]?.sym || '—', sub:`${symRows[0]?.wr.toFixed(0)}% WR`, vc: T.green },
+          { lbl:'LONG Win Rate', val:`${dirWR('LONG').toFixed(0)}%`, sub:`${byDir.LONG.w+byDir.LONG.l} trades`, vc: dirWR('LONG') >= 50 ? T.green : T.red },
+          { lbl:'SHORT Win Rate', val:`${dirWR('SHORT').toFixed(0)}%`, sub:`${byDir.SHORT.w+byDir.SHORT.l} trades`, vc: dirWR('SHORT') >= 50 ? T.green : T.red },
+          { lbl:'Best Trade', val:`+$${best?.pnl||0}`, sub: best ? `${best.sym} ${best.dir||''}` : '—', vc: T.green },
+        ].map(st => (
+          <ShellKpi key={st.lbl} label={st.lbl} value={st.val} sub={st.sub} color={st.vc}/>
+        ))}
+      </div>
+
+      {/* ── Symbol + Direction breakdown ── */}
+      <div className="pp-grid pp-grid-2x">
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:15, marginBottom:14 }}>Win Rate by Symbol</div>
+          <div className="pp-grid" style={{ gap:10 }}>
+            {symRows.map(row => (
+              <div key={row.sym}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:5 }}>
+                  <span style={{ color:T.sub, fontSize:12, fontWeight:700 }}>{row.sym}</span>
+                  <span style={{ color: row.wr >= 50 ? T.green : T.red, fontWeight:800, fontSize:12 }}>
+                    {row.wr.toFixed(0)}% <span style={{ color:T.muted, fontWeight:400 }}>({row.total} trades)</span>
+                  </span>
+                </div>
+                <div style={{ height:8, background:'rgba(255,255,255,.06)', borderRadius:999, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${row.wr}%`, background: row.wr >= 50 ? T.green : T.red, borderRadius:999, transition:'width .4s ease' }}/>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:15, marginBottom:14 }}>Win Rate by Direction</div>
+          {['LONG','SHORT'].map(d => {
+            const v = byDir[d]; const tot = v.w+v.l; const wr = tot ? v.w/tot*100 : 0;
+            return (
+              <div key={d} style={{ marginBottom:18 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                  <span style={{ color: d==='LONG'?T.green:T.red, fontWeight:800, fontSize:14 }}>{d==='LONG'?'🟢':'🔴'} {d}</span>
+                  <span style={{ fontWeight:900, fontSize:16, color: wr>=50?T.green:T.red }}>{wr.toFixed(0)}%</span>
+                </div>
+                <div style={{ height:10, background:'rgba(255,255,255,.06)', borderRadius:999, overflow:'hidden' }}>
+                  <div style={{ height:'100%', width:`${wr}%`, background: wr>=50?T.green:T.red, borderRadius:999 }}/>
+                </div>
+                <div style={{ color:T.muted, fontSize:11, marginTop:4 }}>{v.w}W · {v.l}L of {tot} trades</div>
+              </div>
+            );
+          })}
+
+          <div style={{ borderTop:`1px solid ${T.border}`, paddingTop:14, marginTop:4 }}>
+            <div style={{ color:T.muted, fontSize:11, marginBottom:8 }}>Best/Worst Trades</div>
+            {[['Best', best, T.green], ['Worst', worst, T.red]].map(([lbl, tr, col]) => tr ? (
+              <div key={lbl} style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                <span style={{ color:T.sub, fontSize:12 }}>{lbl}: <b style={{color:T.text}}>{tr.sym} {tr.dir||''}</b></span>
+                <span style={{ color:col, fontWeight:800, fontSize:12 }}>{tr.pnl>0?'+':''}${tr.pnl}</span>
+              </div>
+            ) : null)}
+          </div>
+        </div>
+      </div>
+
+      {/* ── P&L by day of week ── */}
+      <div className="pp-panel" style={{ padding:20 }}>
+        <div style={{ fontWeight:800, fontSize:15, marginBottom:14 }}>P&L by Day of Week</div>
+        <div style={{ display:'flex', gap:8, alignItems:'flex-end', flexWrap:'wrap' }}>
+          {[1,2,3,4,5].map(dow => { // Mon–Fri only
+            const d = byDow[dow];
+            const maxPnl = Math.max(...[1,2,3,4,5].map(i => Math.abs(byDow[i].pnl))) || 1;
+            const barH = Math.round((Math.abs(d.pnl) / maxPnl) * 80);
+            return (
+              <div key={dow} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:6 }}>
+                <div style={{ color: d.pnl>=0?T.green:T.red, fontWeight:800, fontSize:11 }}>
+                  {d.pnl>=0?'+':''}${d.pnl}
+                </div>
+                <div style={{ width:'100%', height:80, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+                  <div style={{ width:'60%', height: barH||4, background: d.pnl>=0?T.green:T.red, borderRadius:'4px 4px 0 0', opacity:0.8 }}/>
+                </div>
+                <div style={{ color:T.sub, fontSize:12, fontWeight:700 }}>{DOW[dow]}</div>
+                <div style={{ color:T.muted, fontSize:10 }}>{d.count}tr</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Score distribution ── */}
+      <div className="pp-panel" style={{ padding:20 }}>
+        <div style={{ fontWeight:800, fontSize:15, marginBottom:14 }}>Quality Score vs Win Rate</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+          {scoreBuckets.map(b => (
+            <div key={b.lbl} style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:12, padding:'14px 16px', textAlign:'center' }}>
+              <div style={{ color:T.muted, fontSize:11, marginBottom:6 }}>Score {b.lbl}</div>
+              <div style={{ fontWeight:900, fontSize:24, color: b.wr>=60?T.green:b.wr>=40?T.amber:T.red }}>{b.wr.toFixed(0)}%</div>
+              <div style={{ color:T.muted, fontSize:11, marginTop:4 }}>WR · {b.count} trades</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ color:T.muted, fontSize:11, marginTop:12 }}>
+          Higher quality scores should correlate with higher win rates. If not, review your entry criteria.
+        </div>
+      </div>
+
+      {/* ── Monthly P&L ── */}
+      {monthRows.length > 1 && (
+        <div className="pp-panel" style={{ padding:20 }}>
+          <div style={{ fontWeight:800, fontSize:15, marginBottom:14 }}>Monthly P&L</div>
+          <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+            {monthRows.map(([month, pnl]) => (
+              <div key={month} style={{ flex:'1 1 120px', background:'rgba(255,255,255,0.03)', border:`1px solid ${pnl>=0?'rgba(16,185,129,0.2)':'rgba(239,68,68,0.2)'}`, borderRadius:10, padding:'12px 16px', textAlign:'center' }}>
+                <div style={{ color:T.muted, fontSize:11, marginBottom:4 }}>{month}</div>
+                <div style={{ fontWeight:900, fontSize:18, color:pnl>=0?T.green:T.red }}>{pnl>=0?'+':''}${pnl}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Journal({ trades, setTrades, plan }) {
+  const [journalView, setJournalView] = useState('trades'); // 'trades' | 'analytics'
   const [sel,      setSel]      = useState(trades[1] || trades[0]);
   const [showLog,  setShowLog]  = useState(false);
   const [pending,  setPending]  = useState(() => LS.get('pendingPlan', null));
@@ -2923,6 +3123,31 @@ function Journal({ trades, setTrades, plan }) {
   return (
     <div>
       {showLog && <LogTradeModal onClose={() => setShowLog(false)} onSave={handleSaveTrade}/>}
+
+      {/* ── Sub-tab bar ── */}
+      <div style={{ display:'flex', gap:6, marginBottom:20, padding:'4px', background:'rgba(255,255,255,0.04)', borderRadius:12, border:'1px solid rgba(255,255,255,0.07)', width:'fit-content' }}>
+        {[['trades','▦ Trades'],['analytics','◈ Analytics']].map(([id,lbl]) => (
+          <button key={id} onClick={() => setJournalView(id)}
+            style={{ padding:'7px 20px', borderRadius:9, border:'none', cursor:'pointer', fontWeight:700, fontSize:13,
+              background: journalView===id ? 'rgba(99,102,241,0.22)' : 'transparent',
+              color: journalView===id ? '#818CF8' : T.muted,
+              boxShadow: journalView===id ? '0 0 0 1px rgba(99,102,241,0.35)' : 'none',
+            }}>
+            {lbl}
+          </button>
+        ))}
+        <button onClick={() => setShowLog(true)}
+          style={{ padding:'7px 16px', borderRadius:9, border:'none', cursor:'pointer', fontWeight:700, fontSize:13,
+            background:`linear-gradient(135deg,${T.green},#059669)`, color:'#000', marginLeft:4 }}>
+          + Log Trade
+        </button>
+      </div>
+
+      {journalView === 'analytics' && (
+        <JournalAnalytics trades={trades}/>
+      )}
+
+      {journalView === 'trades' && (<>
 
       {/* ── Free plan soft limit banner ── */}
       {PLAN_ORDER[plan || 'free'] < PLAN_ORDER['pro'] && trades.length >= 8 && (
@@ -3124,6 +3349,7 @@ function Journal({ trades, setTrades, plan }) {
           </div>
         )}
       </div>
+      </>)}
     </div>
   );
 }
@@ -4560,18 +4786,19 @@ function OutcomeAnalyticsPanel({ data }) {
 }
 
 function SignalsWorkspace({ onNavigate }) {
-  const SYMS      = ['XAU/USD','EUR/USD','GBP/USD','NAS100','GBP/JPY'];
+  const SYMS      = ['XAU/USD','EUR/USD','GBP/USD','NAS100','GBP/JPY','BTC/USD','ETH/USD'];
   const TFS       = [{ v:'15min', l:'15m' }, { v:'1h', l:'1h' }, { v:'4h', l:'4h' }];
   const DIRS      = ['AUTO','LONG','SHORT'];
 
-  const [sym,    setSym]    = useState('XAU/USD');
-  const [tf,     setTf]     = useState('1h');
+  const [sym,    setSym]    = useState(() => LS.get('sig_sym', 'XAU/USD'));
+  const [tf,     setTf]     = useState(() => LS.get('sig_tf', '1h'));
   const [dir,    setDir]    = useState('AUTO');
   const [result, setResult] = useState(null);
   const [candles, setCandles] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error,  setError]  = useState(null);
   const [demoMode, setDemoMode] = useState(false);
+  const ranOnce = React.useRef(false);
 
   const runAnalysis = async () => {
     setLoading(true);
@@ -4649,6 +4876,18 @@ function SignalsWorkspace({ onNavigate }) {
     }
   };
 
+  // Auto-run once on first mount (restores last analysis on tab switch)
+  useEffect(() => {
+    if (ranOnce.current) return;
+    ranOnce.current = true;
+    runAnalysis();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist symbol + tf selection
+  useEffect(() => { LS.set('sig_sym', sym); }, [sym]);
+  useEffect(() => { LS.set('sig_tf', tf); }, [tf]);
+
   const verdictColor = result
     ? result.verdict === result.direction ? T.green
     : result.verdict === 'NO TRADE' ? T.red
@@ -4663,7 +4902,7 @@ function SignalsWorkspace({ onNavigate }) {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 18, flexWrap:'wrap', gap: 8 }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: 17 }}>⚡ Signal Engine</div>
-            <div style={{ color: T.sub, fontSize: 12, marginTop: 3 }}>SMC · EMA · RSI · MACD · BB · Live data from TwelveData</div>
+            <div style={{ color: T.sub, fontSize: 12, marginTop: 3 }}>SMC · EMA · RSI · MACD · BB · <span style={{color:T.teal}}>Yahoo Finance · Free · No API key</span></div>
           </div>
         </div>
 
@@ -4707,7 +4946,7 @@ function SignalsWorkspace({ onNavigate }) {
           <button onClick={runAnalysis} disabled={loading}
             className="pp-btn pp-btn-primary"
             style={{ height: 36, minWidth: 148, fontWeight: 800, fontSize: 13 }}>
-            {loading ? '⏳ Fetching data…' : '⚡ Run Analysis'}
+            {loading ? '⏳ Analyzing…' : '⚡ Run Analysis'}
           </button>
         </div>
 
@@ -4729,7 +4968,7 @@ function SignalsWorkspace({ onNavigate }) {
             <div style={{ marginBottom: 14, padding: '8px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.25)', display:'flex', alignItems:'center', gap: 10 }}>
               <span style={{ fontSize: 14 }}>🔶</span>
               <span style={{ color: T.amber, fontSize: 12, fontWeight: 700 }}>DEMO MODE</span>
-              <span style={{ color: T.sub, fontSize: 12 }}>— TA analysis is real, price data is synthetic. Add your own TwelveData key in Settings for live prices.</span>
+              <span style={{ color: T.sub, fontSize: 12 }}>— TA analysis is real, price data is synthetic. Live data will resume automatically when Yahoo Finance API is reachable.</span>
             </div>
           )}
 
