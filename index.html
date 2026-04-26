@@ -576,6 +576,69 @@ const SB_URL = 'https://nxiednydxyrtxpkmgtof.supabase.co';
 const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
 const SB_HDR = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` };
 const SB_JSON_HDR = { ...SB_HDR, 'Content-Type': 'application/json' };
+
+// ── Supabase: user_challenges sync ────────────────────────────────────────
+async function syncChallengeToSB(userId, challengeData) {
+  if (!userId || !sbClient) return;
+  try {
+    await fetch(`${SB_URL}/rest/v1/user_challenges`, {
+      method: 'POST',
+      headers: { ...SB_JSON_HDR, 'Prefer': 'resolution=merge-duplicates,return=minimal',
+        'Authorization': `Bearer ${(await sbClient.auth.getSession()).data.session?.access_token || SB_KEY}` },
+      body: JSON.stringify({ user_id: userId, challenge_data: challengeData, updated_at: new Date().toISOString() }),
+    });
+  } catch(e) { console.warn('[sync] Challenge upload failed:', e); }
+}
+
+async function loadChallengeFromSB(userId) {
+  if (!userId || !sbClient) return null;
+  try {
+    const token = (await sbClient.auth.getSession()).data.session?.access_token || SB_KEY;
+    const r = await fetch(
+      `${SB_URL}/rest/v1/user_challenges?user_id=eq.${userId}&select=challenge_data&limit=1`,
+      { headers: { ...SB_HDR, Authorization: `Bearer ${token}`, Accept: 'application/json' } }
+    );
+    if (!r.ok) return null;
+    const arr = await r.json();
+    return arr?.[0]?.challenge_data || null;
+  } catch { return null; }
+}
+
+// ── Supabase: user_profiles (plan + onboarding) ───────────────────────────
+async function loadUserProfile(userId) {
+  if (!userId || !sbClient) return { plan:'free', onboarding_done:false };
+  try {
+    const token = (await sbClient.auth.getSession()).data.session?.access_token || SB_KEY;
+    const r = await fetch(
+      `${SB_URL}/rest/v1/user_profiles?id=eq.${userId}&select=plan,onboarding_done&limit=1`,
+      { headers: { ...SB_HDR, Authorization: `Bearer ${token}`, Accept: 'application/json' } }
+    );
+    if (!r.ok) return { plan:'free', onboarding_done:false };
+    const arr = await r.json();
+    return arr?.[0] || { plan:'free', onboarding_done:false };
+  } catch { return { plan:'free', onboarding_done:false }; }
+}
+
+async function saveUserProfile(userId, updates) {
+  if (!userId || !sbClient) return;
+  try {
+    const token = (await sbClient.auth.getSession()).data.session?.access_token || SB_KEY;
+    await fetch(`${SB_URL}/rest/v1/user_profiles`, {
+      method: 'POST',
+      headers: { ...SB_JSON_HDR, Authorization: `Bearer ${token}`,
+        'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ id: userId, ...updates, updated_at: new Date().toISOString() }),
+    });
+  } catch(e) { console.warn('[profile] Save failed:', e); }
+}
+
+// ── Plan tier constants ────────────────────────────────────────────────────
+const PLAN_ORDER = { free:0, pro:1, elite:2 };
+const PLAN_META  = {
+  free:  { label:'Free',  color:'#64748B', price:'$0/mo',  features:['Signal engine','Basic journal (10 trades)','Today dashboard'] },
+  pro:   { label:'Pro',   color:'#6366F1', price:'$29/mo', features:['Everything in Free','Unlimited journal + AI coaching','Challenge sync across devices','Analyze tab','Risk calculator'] },
+  elite: { label:'Elite', color:'#F59E0B', price:'$59/mo', features:['Everything in Pro','Automation & paper trading','Priority support','Multi-challenge tracking'] },
+};
 const sbClient = (() => {
   try { return window.supabase ? window.supabase.createClient(SB_URL, SB_KEY) : null; }
   catch (e) { console.warn('Supabase client unavailable', e); return null; }
@@ -1181,10 +1244,21 @@ function Dashboard({ account, phase }) {
   }, []);
 
   const fetchCalendar = useCallback(async () => {
-    // Static placeholder — no free CORS-friendly calendar API
-    setNews([
-      { impact:'HIGH', title:'Check ForexFactory for today\'s events', currency:'ALL', dateLabel:'Today' },
-    ]);
+    const CACHE_KEY = 'ff_cal_v2';
+    const cached = LS.get(CACHE_KEY, null);
+    if (cached && (Date.now() - cached.ts) < 3_600_000) { setNews(cached.data); return; }
+    try {
+      const r = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json?version=9');
+      if (!r.ok) throw new Error('fetch');
+      const data = await r.json();
+      if (!Array.isArray(data)) throw new Error('bad');
+      const todayISO = new Date().toISOString().slice(0, 10);
+      const todayEvts = data.filter(e => e.date?.startsWith(todayISO) && ['High','Medium'].includes(e.impact));
+      LS.set(CACHE_KEY, { data: todayEvts, ts: Date.now() });
+      setNews(todayEvts);
+    } catch {
+      setNews([{ impact:'High', title:'CPI / NFP — check ForexFactory', country:'USD', time:'—', date: new Date().toISOString().slice(0,10) }]);
+    }
   }, []);
 
   const fetchSignals = useCallback(async () => {
@@ -1583,7 +1657,7 @@ function ChallengeSetupWizard({ onSave }) {
   );
 }
 
-function ChallengeTracker({ cfg, account, onReset }) {
+function ChallengeTracker({ cfg, account, onReset, userId }) {
   const firm    = PROP_FIRMS[cfg.firmId];
   const type    = firm.types[cfg.typeId];
   const phases  = type.phases;
@@ -1697,8 +1771,16 @@ function ChallengeTracker({ cfg, account, onReset }) {
           </div>
         </div>
         <div style={{ display:'flex', gap:10 }}>
-          <button onClick={() => setEditing(e => !e)} style={{ padding:'7px 16px', borderRadius:8, border:`1px solid ${T.border}`, background:'rgba(255,255,255,0.04)', color:T.sub, fontSize:13, cursor:'pointer', fontWeight:600 }}>
-            {editing ? '✓ Done' : '✎ Edit'}
+          <button onClick={() => {
+            setEditing(e => !e);
+            // When closing editor, sync updated progress to Supabase
+            if (editing && userId) {
+              const updated = { ...cfg, curPnl, tradeDays, curPhaseIdx: phaseIdx };
+              LS.set('challenge', updated);
+              syncChallengeToSB(userId, updated);
+            }
+          }} style={{ padding:'7px 16px', borderRadius:8, border:`1px solid ${T.border}`, background:'rgba(255,255,255,0.04)', color:T.sub, fontSize:13, cursor:'pointer', fontWeight:600 }}>
+            {editing ? '☁️ Save & Sync' : '✎ Edit'}
           </button>
           <button onClick={onReset} style={{ padding:'7px 16px', borderRadius:8, border:'1px solid rgba(239,68,68,0.4)', background:'rgba(239,68,68,0.08)', color:'#F87171', fontSize:13, cursor:'pointer', fontWeight:600 }}>
             Reset
@@ -1888,22 +1970,30 @@ function ChallengeTracker({ cfg, account, onReset }) {
   );
 }
 
-function ChallengeMode({ account, phase }) {
+function ChallengeMode({ account, phase, userId }) {
   const [challenge, setChallenge] = useState(() => LS.get('challenge', null));
+  const { show: showToast } = useToast();
 
-  const handleSave = (cfg) => {
+  const handleSave = async (cfg) => {
     LS.set('challenge', cfg);
     setChallenge(cfg);
+    // Sync to Supabase in background
+    if (userId) {
+      await syncChallengeToSB(userId, cfg);
+      showToast('☁️ Challenge synced to cloud', 'success', 2500);
+    }
   };
+
   const handleReset = () => {
     if (window.confirm('Reset challenge tracker? This will clear all saved progress.')) {
       LS.set('challenge', null);
       setChallenge(null);
+      if (userId) syncChallengeToSB(userId, null);
     }
   };
 
   if (!challenge) return <ChallengeSetupWizard onSave={handleSave}/>;
-  return <ChallengeTracker cfg={challenge} account={account} onReset={handleReset}/>;
+  return <ChallengeTracker cfg={challenge} account={account} onReset={handleReset} userId={userId}/>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2695,7 +2785,7 @@ function EquityCurve({ trades }) {
   );
 }
 
-function Journal({ trades, setTrades }) {
+function Journal({ trades, setTrades, plan }) {
   const [sel,      setSel]      = useState(trades[1] || trades[0]);
   const [showLog,  setShowLog]  = useState(false);
   const [pending,  setPending]  = useState(() => LS.get('pendingPlan', null));
@@ -2740,6 +2830,26 @@ function Journal({ trades, setTrades }) {
   return (
     <div>
       {showLog && <LogTradeModal onClose={() => setShowLog(false)} onSave={handleSaveTrade}/>}
+
+      {/* ── Free plan soft limit banner ── */}
+      {PLAN_ORDER[plan || 'free'] < PLAN_ORDER['pro'] && trades.length >= 8 && (
+        <div style={{ marginBottom:20, padding:'14px 18px', background:'rgba(99,102,241,0.07)', border:'1px solid rgba(99,102,241,0.28)', borderRadius:12, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
+          <div>
+            <div style={{ fontWeight:800, fontSize:14, color:'#818CF8', marginBottom:4 }}>
+              {trades.length >= 10 ? '🔒 Trade limit reached (10/10)' : `📈 ${trades.length}/10 trades used on Free plan`}
+            </div>
+            <div style={{ color:T.sub, fontSize:13 }}>
+              {trades.length >= 10
+                ? 'Upgrade to Pro for unlimited trades, AI coaching, and cloud sync.'
+                : `${10 - trades.length} trades remaining. Upgrade to Pro for unlimited journaling.`}
+            </div>
+          </div>
+          <button onClick={() => { LS.set('show_upgrade', true); window.dispatchEvent(new Event('show_upgrade')); }}
+            style={{ padding:'9px 20px', background:'linear-gradient(135deg,#6366F1,#4F46E5)', border:'none', borderRadius:9, color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>
+            Upgrade to Pro →
+          </button>
+        </div>
+      )}
 
       {/* ── Pending plan banner from Check Trade ── */}
       {pending && (
@@ -2885,20 +2995,22 @@ function Journal({ trades, setTrades }) {
                   <div style={{ color:T.sub, fontSize:13 }}>{sel.issue}</div>
                 </div>
               )}
-              {(() => {
-                const coaching = generateCoachFeedback(sel, trades);
-                return (
-                  <>
-                    <p style={{ color:T.sub, fontSize:13, lineHeight:1.82, margin:'0 0 14px' }}>{coaching.body}</p>
-                    {coaching.rec && (
-                      <div style={{ padding:'10px 14px', background:'rgba(251,191,36,0.07)', border:'1px solid rgba(251,191,36,0.22)', borderRadius:8 }}>
-                        <span style={{ color:T.yellow, fontSize:12, fontWeight:700 }}>💡 REC: </span>
-                        <span style={{ color:T.sub, fontSize:12 }}>{coaching.rec}</span>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+              <PlanGate minPlan="pro" plan={plan} feature="AI coaching analyses every trade's R:R, patterns, and gives recommendations">
+                {(() => {
+                  const coaching = generateCoachFeedback(sel, trades);
+                  return (
+                    <>
+                      <p style={{ color:T.sub, fontSize:13, lineHeight:1.82, margin:'0 0 14px' }}>{coaching.body}</p>
+                      {coaching.rec && (
+                        <div style={{ padding:'10px 14px', background:'rgba(251,191,36,0.07)', border:'1px solid rgba(251,191,36,0.22)', borderRadius:8 }}>
+                          <span style={{ color:T.yellow, fontSize:12, fontWeight:700 }}>💡 REC: </span>
+                          <span style={{ color:T.sub, fontSize:12 }}>{coaching.rec}</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </PlanGate>
             </div>
             <div style={{ ...card }}>
               <div style={{ color:T.sub, fontSize:13, fontWeight:700, marginBottom:14 }}>Week Discipline Scan</div>
@@ -3726,6 +3838,9 @@ function TodayScreen({ data, phase, accountView, trades, onNavigate }) {
 
   return (
     <div className="pp-grid" style={{ gap:20 }}>
+
+      {/* ── NEWS EVENTS STRIP ── */}
+      <NewsStrip compact={false}/>
 
       {/* ── CAN I TRADE? HERO BANNER ── */}
       <div className="pp-panel" style={{
@@ -5217,6 +5332,268 @@ class TabBoundary extends React.Component {
 // AUTH SCREEN
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// LIVE NEWS EVENTS HOOK — fetches ForexFactory calendar, caches 1h
+// ═══════════════════════════════════════════════════════════════════════════
+function useNewsEvents() {
+  const [events,  setEvents]  = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const CACHE_KEY = 'ff_cal_v2';
+    const cached = LS.get(CACHE_KEY, null);
+    if (cached && (Date.now() - cached.ts) < 3_600_000) {
+      setEvents(cached.data); setLoading(false); return;
+    }
+    fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json?version=9')
+      .then(r => { if (!r.ok) throw new Error('fetch'); return r.json(); })
+      .then(data => {
+        if (!Array.isArray(data)) throw new Error('bad data');
+        const todayISO = new Date().toISOString().slice(0, 10); // "2026-04-26"
+        const todayEvts = data.filter(e => {
+          if (!e.date) return false;
+          return e.date.startsWith(todayISO);
+        }).filter(e => ['High','Medium'].includes(e.impact));
+        LS.set(CACHE_KEY, { data: todayEvts, ts: Date.now() });
+        setEvents(todayEvts);
+      })
+      .catch(() => {
+        setEvents([{
+          impact:'High', title:'CPI / NFP — check ForexFactory',
+          country:'USD', time:'Check calendar', date: new Date().toISOString().slice(0,10),
+        }]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  return { events, loading };
+}
+
+// ── NewsStrip component (inline strip of today's events) ─────────────────
+function NewsStrip({ compact = false }) {
+  const { events, loading } = useNewsEvents();
+  if (loading) return null;
+  if (!events.length) return (
+    <div style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'4px 10px', background:'rgba(52,211,153,0.08)', border:'1px solid rgba(52,211,153,0.2)', borderRadius:8, fontSize:12, color:'#34D399' }}>
+      📅 No high-impact news today
+    </div>
+  );
+  if (compact) return (
+    <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+      {events.map((e,i) => (
+        <div key={i} style={{
+          display:'inline-flex', alignItems:'center', gap:5, padding:'3px 9px',
+          background: e.impact === 'High' ? 'rgba(239,68,68,0.1)' : 'rgba(245,166,35,0.08)',
+          border: `1px solid ${e.impact === 'High' ? 'rgba(239,68,68,0.28)' : 'rgba(245,166,35,0.22)'}`,
+          borderRadius:7, fontSize:11, color: e.impact === 'High' ? '#F87171' : T.amber,
+        }}>
+          <span style={{ fontWeight:800 }}>{e.impact === 'High' ? '🔴' : '🟡'}</span>
+          {e.country} {e.title?.slice(0,28)}{e.title?.length > 28 ? '…' : ''} {e.time || ''}
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <div style={{ padding:'14px 18px', background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:12, marginBottom:16 }}>
+      <div style={{ fontSize:11, color:T.red, fontWeight:800, letterSpacing:'.08em', marginBottom:10 }}>⚠ HIGH-IMPACT NEWS TODAY</div>
+      <div style={{ display:'flex', flexDirection:'column', gap:7 }}>
+        {events.map((e,i) => (
+          <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8 }}>
+            <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+              <span style={{ fontSize:12, color: e.impact === 'High' ? T.red : T.amber, fontWeight:800 }}>
+                {e.impact === 'High' ? '🔴' : '🟡'}
+              </span>
+              <span style={{ color:T.sub, fontSize:13, fontWeight:600 }}>{e.country}</span>
+              <span style={{ color:T.text, fontSize:13 }}>{e.title}</span>
+            </div>
+            <span style={{ color:T.muted, fontSize:12, fontFamily:'monospace' }}>{e.time || '—'}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop:10, fontSize:11, color:T.muted }}>
+        Reduce position size or avoid trading 30min before/after each event.
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UPGRADE MODAL — shown when free user hits a plan gate
+// ═══════════════════════════════════════════════════════════════════════════
+function UpgradeModal({ onClose, requiredPlan = 'pro', feature = '' }) {
+  const req = PLAN_META[requiredPlan];
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', zIndex:9000, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }} onClick={onClose}>
+      <div style={{ background:'#0d1117', border:'1px solid rgba(255,255,255,0.12)', borderRadius:20, padding:36, maxWidth:520, width:'100%', boxShadow:'0 32px 96px rgba(0,0,0,0.8)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ textAlign:'center', marginBottom:28 }}>
+          <div style={{ fontSize:44, marginBottom:10 }}>🚀</div>
+          <div style={{ fontWeight:900, fontSize:22, marginBottom:8, color:req.color }}>{req.label} Required</div>
+          {feature && <div style={{ color:T.sub, fontSize:14 }}><strong style={{ color:T.text }}>{feature}</strong> is a {req.label} feature.</div>}
+        </div>
+
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:28 }}>
+          {['pro','elite'].map(p => {
+            const meta = PLAN_META[p];
+            const isReq = p === requiredPlan;
+            return (
+              <div key={p} style={{ padding:'18px 16px', borderRadius:14, border:`1.5px solid ${isReq ? meta.color : 'rgba(255,255,255,0.1)'}`, background: isReq ? `${meta.color}10` : 'rgba(255,255,255,0.03)' }}>
+                <div style={{ fontWeight:900, fontSize:16, color:meta.color, marginBottom:4 }}>{meta.label}</div>
+                <div style={{ fontWeight:800, fontSize:20, color:T.text, marginBottom:10 }}>{meta.price}</div>
+                {meta.features.map(f => (
+                  <div key={f} style={{ color:T.sub, fontSize:12, marginBottom:4, display:'flex', gap:6 }}>
+                    <span style={{ color: isReq ? meta.color : T.muted }}>✓</span> {f}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ display:'flex', gap:10 }}>
+          <button onClick={() => window.open('mailto:upgrade@proppilot.ai?subject=Upgrade to ' + req.label, '_blank')}
+            style={{ flex:1, padding:'13px 0', background:`linear-gradient(135deg,${req.color},${req.color}cc)`, border:'none', borderRadius:11, color:'#fff', fontSize:14, fontWeight:800, cursor:'pointer' }}>
+            Upgrade to {req.label} →
+          </button>
+          <button onClick={onClose} style={{ padding:'13px 20px', background:'transparent', border:`1px solid ${T.border}`, borderRadius:11, color:T.muted, fontSize:13, cursor:'pointer' }}>
+            Maybe later
+          </button>
+        </div>
+        <div style={{ textAlign:'center', marginTop:12, color:T.muted, fontSize:11 }}>
+          Contact support: upgrade@proppilot.ai
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── PlanGate: wraps gated features ────────────────────────────────────────
+function PlanGate({ minPlan, children, feature, plan }) {
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const userPlan = plan || LS.get('user_plan', 'free');
+  const hasAccess = PLAN_ORDER[userPlan] >= PLAN_ORDER[minPlan];
+
+  if (hasAccess) return children;
+
+  return (
+    <>
+      {showUpgrade && <UpgradeModal requiredPlan={minPlan} feature={feature} onClose={() => setShowUpgrade(false)}/>}
+      <div style={{ padding:'18px 20px', background:`${PLAN_META[minPlan].color}08`, border:`1px solid ${PLAN_META[minPlan].color}30`, borderRadius:12, textAlign:'center' }}>
+        <div style={{ fontSize:24, marginBottom:8 }}>🔒</div>
+        <div style={{ fontWeight:700, fontSize:14, color:PLAN_META[minPlan].color, marginBottom:6 }}>{PLAN_META[minPlan].label} Feature</div>
+        {feature && <div style={{ color:T.sub, fontSize:13, marginBottom:14 }}>{feature}</div>}
+        <button onClick={() => setShowUpgrade(true)} style={{ padding:'8px 20px', background:`linear-gradient(135deg,${PLAN_META[minPlan].color},${PLAN_META[minPlan].color}cc)`, border:'none', borderRadius:9, color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+          Upgrade to {PLAN_META[minPlan].label}
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ONBOARDING WIZARD — shown to new users on first login
+// ═══════════════════════════════════════════════════════════════════════════
+function OnboardingWizard({ user, onComplete, onNavigate }) {
+  const [step, setStep] = useState(0); // 0=welcome, 1=challenge, 2=done
+  const [setupDone, setSetupDone] = useState(false);
+
+  const finish = async () => {
+    LS.set('onboarding_done', true);
+    await saveUserProfile(user?.id, { onboarding_done: true });
+    onComplete();
+  };
+
+  const handleChallengeSetup = async (cfg) => {
+    LS.set('challenge', cfg);
+    await syncChallengeToSB(user?.id, cfg);
+    setSetupDone(true);
+    setStep(2);
+  };
+
+  const stepDots = (
+    <div style={{ display:'flex', gap:8, justifyContent:'center', marginBottom:28 }}>
+      {[0,1,2].map(i => (
+        <div key={i} style={{ width:8, height:8, borderRadius:'50%', background: i <= step ? '#6366F1' : 'rgba(255,255,255,0.15)', transition:'background 0.3s' }}/>
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(5,7,15,0.96)', zIndex:9100, display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+      <div style={{ background:'rgba(13,17,23,0.98)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:24, padding:'40px 36px', maxWidth:560, width:'100%', boxShadow:'0 40px 120px rgba(0,0,0,0.9)' }}>
+        {stepDots}
+
+        {/* ── STEP 0: WELCOME ── */}
+        {step === 0 && (
+          <div style={{ textAlign:'center' }}>
+            <div style={{ fontSize:56, marginBottom:16 }}>⚡</div>
+            <div style={{ fontWeight:900, fontSize:26, marginBottom:10 }}>Welcome to PropPilot AI</div>
+            <div style={{ color:T.sub, fontSize:15, lineHeight:1.7, marginBottom:8 }}>
+              Your prop trading command center. Signals, risk management, challenge tracking — all in one place.
+            </div>
+            <div style={{ color:T.muted, fontSize:13, marginBottom:32 }}>
+              Logged in as <strong style={{ color:T.sub }}>{user?.email}</strong>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12, marginBottom:32 }}>
+              {[
+                { icon:'⚡', label:'AI Signals', sub:'Live SMC analysis' },
+                { icon:'◎', label:'Challenge Tracking', sub:'FTMO, MyFundedFX +' },
+                { icon:'▦', label:'Smart Journal', sub:'AI coaching per trade' },
+              ].map(({ icon, label, sub }) => (
+                <div key={label} style={{ padding:'16px 12px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:12, textAlign:'center' }}>
+                  <div style={{ fontSize:24, marginBottom:6 }}>{icon}</div>
+                  <div style={{ fontWeight:700, fontSize:13 }}>{label}</div>
+                  <div style={{ color:T.muted, fontSize:11, marginTop:3 }}>{sub}</div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setStep(1)} style={{ width:'100%', padding:'14px 0', background:'linear-gradient(135deg,#6366F1,#4F46E5)', border:'none', borderRadius:12, color:'#fff', fontSize:15, fontWeight:800, cursor:'pointer' }}>
+              Let's set up your challenge →
+            </button>
+            <button onClick={finish} style={{ marginTop:10, background:'transparent', border:'none', color:T.muted, fontSize:13, cursor:'pointer', textDecoration:'underline' }}>
+              Skip — I'll do this later
+            </button>
+          </div>
+        )}
+
+        {/* ── STEP 1: CHALLENGE SETUP ── */}
+        {step === 1 && (
+          <div>
+            <div style={{ textAlign:'center', marginBottom:24 }}>
+              <div style={{ fontSize:40, marginBottom:10 }}>◎</div>
+              <div style={{ fontWeight:900, fontSize:22, marginBottom:8 }}>Set Up Your Challenge</div>
+              <div style={{ color:T.sub, fontSize:14 }}>Which prop firm are you trading with?</div>
+            </div>
+            <ChallengeSetupWizard onSave={handleChallengeSetup}/>
+            <button onClick={() => { setStep(2); }} style={{ marginTop:14, width:'100%', padding:'10px 0', background:'transparent', border:`1px solid ${T.border}`, borderRadius:10, color:T.muted, fontSize:13, cursor:'pointer' }}>
+              Skip for now
+            </button>
+          </div>
+        )}
+
+        {/* ── STEP 2: DONE ── */}
+        {step === 2 && (
+          <div style={{ textAlign:'center' }}>
+            <div style={{ fontSize:56, marginBottom:16 }}>✅</div>
+            <div style={{ fontWeight:900, fontSize:24, marginBottom:10 }}>You're Ready!</div>
+            <div style={{ color:T.sub, fontSize:14, lineHeight:1.8, marginBottom:32 }}>
+              {setupDone ? 'Challenge configured and synced. ' : ''}
+              Your command center is live. Start by running the Signal Engine to find your first trade setup.
+            </div>
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              <button onClick={() => { onNavigate('signals'); finish(); }} style={{ padding:'14px 0', background:'linear-gradient(135deg,#6366F1,#4F46E5)', border:'none', borderRadius:12, color:'#fff', fontSize:15, fontWeight:800, cursor:'pointer' }}>
+                ⚡ Run My First Signal →
+              </button>
+              <button onClick={finish} style={{ padding:'12px 0', background:'transparent', border:`1px solid ${T.border}`, borderRadius:12, color:T.sub, fontSize:13, cursor:'pointer' }}>
+                Go to Today Dashboard
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AuthScreen({ onAuth }) {
   const [mode,     setMode]     = useState('login'); // 'login' | 'register'
   const [email,    setEmail]    = useState('');
@@ -5400,6 +5777,40 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
     typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
   );
 
+  // ── Plan tier ────────────────────────────────────────────────────────────
+  const [userPlan, setUserPlan] = useState(() => LS.get('user_plan', 'free'));
+
+  // ── Onboarding ───────────────────────────────────────────────────────────
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // On mount: load profile (plan + onboarding), restore challenge from Supabase
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      // Load profile
+      const profile = await loadUserProfile(user.id);
+      const plan = profile?.plan || 'free';
+      setUserPlan(plan);
+      LS.set('user_plan', plan);
+
+      // Show onboarding if not done
+      const localDone = LS.get('onboarding_done', false);
+      if (!localDone && !profile?.onboarding_done) {
+        setShowOnboarding(true);
+      }
+
+      // Restore challenge from Supabase if localStorage is empty
+      const localChallenge = LS.get('challenge', null);
+      if (!localChallenge) {
+        const remoteChallenge = await loadChallengeFromSB(user.id);
+        if (remoteChallenge) {
+          LS.set('challenge', remoteChallenge);
+          showToast('✅ Challenge data restored from cloud', 'success', 4000);
+        }
+      }
+    })();
+  }, [user?.id]);
+
   // Subscribe Realtime for push notifications
   useEffect(() => {
     if (!sbClient || !pushMgr) return;
@@ -5458,6 +5869,13 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
 
   return (
     <div className="pp-app-shell">
+      {showOnboarding && (
+        <OnboardingWizard
+          user={user}
+          onComplete={() => setShowOnboarding(false)}
+          onNavigate={setScreen}
+        />
+      )}
       {showSetup && <SetupModal account={account} setAccount={handleSetAccount} onClose={() => setShowSetup(false)}/>}
       <UnifiedAppHeader
         screen={screen}
@@ -5493,11 +5911,11 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
               {screen === 'dashboard' && <TodayScreen data={appData} phase={phase} accountView={accountView} trades={trades} onNavigate={setScreen}/>}
               {screen === 'signals'   && <SignalsWorkspace onNavigate={setScreen}/>}
               {screen === 'analyze'   && <CheckTrade account={accountView} phase={phase} onNavigate={setScreen}/>}
-              {screen === 'journal'   && <Journal trades={trades} setTrades={t => { setTrades(t); LS.set('trades', t); }}/>}
+              {screen === 'journal'   && <Journal trades={trades} setTrades={t => { setTrades(t); LS.set('trades', t); }} plan={userPlan}/>}
               {screen === 'risk'      && <RiskCalc account={accountView}/>}
               {screen === 'analytics' && <OutcomeAnalyticsPanel data={appData}/>}
-              {screen === 'challenge' && <ChallengeMode account={accountView} phase={phase}/>}
-              {screen === 'settings'  && <SettingsWorkbench data={appData} accountView={accountView} onUpdateAccount={() => setShowSetup(true)}/>}
+              {screen === 'challenge' && <ChallengeMode account={accountView} phase={phase} userId={user?.id}/>}
+              {screen === 'settings'  && <SettingsWorkbench data={appData} accountView={accountView} onUpdateAccount={() => setShowSetup(true)} plan={userPlan}/>}
             </TabBoundary>
           </>
         )}
