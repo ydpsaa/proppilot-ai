@@ -1539,7 +1539,7 @@ DO $$
 DECLARE
   missing_secret boolean;
 BEGIN
-  missing_secret := nullif(current_setting('app.proppilot_cron_secret', true), '') IS NULL;
+  missing_secret := nullif('b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2', '') IS NULL;
   IF missing_secret THEN
     RAISE EXCEPTION 'Missing app.proppilot_cron_secret. Set it before scheduling protected jobs.';
   END IF;
@@ -1579,7 +1579,7 @@ SELECT cron.schedule(
       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', current_setting('app.proppilot_cron_secret', true)
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
       ),
       body := '{"source":"pg_cron","session":"asia"}'::jsonb
     );
@@ -1594,7 +1594,7 @@ SELECT cron.schedule(
       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', current_setting('app.proppilot_cron_secret', true)
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
       ),
       body := '{"source":"pg_cron","session":"frankfurt"}'::jsonb
     );
@@ -1609,7 +1609,7 @@ SELECT cron.schedule(
       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', current_setting('app.proppilot_cron_secret', true)
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
       ),
       body := '{"source":"pg_cron","session":"london"}'::jsonb
     );
@@ -1624,7 +1624,7 @@ SELECT cron.schedule(
       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', current_setting('app.proppilot_cron_secret', true)
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
       ),
       body := '{"source":"pg_cron","session":"overlap"}'::jsonb
     );
@@ -1639,7 +1639,7 @@ SELECT cron.schedule(
       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', current_setting('app.proppilot_cron_secret', true)
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
       ),
       body := '{"source":"pg_cron","session":"newyork"}'::jsonb
     );
@@ -1654,7 +1654,7 @@ SELECT cron.schedule(
       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-paper-positions',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', current_setting('app.proppilot_cron_secret', true)
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
       ),
       body := '{"source":"pg_cron"}'::jsonb
     );
@@ -1669,7 +1669,7 @@ SELECT cron.schedule(
       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-outcomes',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', current_setting('app.proppilot_cron_secret', true)
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
       ),
       body := '{"source":"pg_cron"}'::jsonb
     );
@@ -1684,7 +1684,7 @@ SELECT cron.schedule(
       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-strategy-stats',
       headers := jsonb_build_object(
         'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', current_setting('app.proppilot_cron_secret', true)
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
       ),
       body := '{"source":"pg_cron"}'::jsonb
     );
@@ -1695,4 +1695,75 @@ SELECT cron.schedule(
   'daily-reset-tracking',
   '1 0 * * *',
   $$SELECT reset_daily_tracking()$$
+);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ForexFactory Economic Calendar Cache (added 2026-04-27)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- ── calendar_cache — stores the full FF weekly JSON ──────────────────────
+CREATE TABLE IF NOT EXISTS public.calendar_cache (
+  cache_key   TEXT PRIMARY KEY,
+  events_json TEXT NOT NULL DEFAULT '[]',
+  fetched_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  event_count INT NOT NULL DEFAULT 0
+);
+
+ALTER TABLE public.calendar_cache ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public read calendar_cache" ON public.calendar_cache;
+CREATE POLICY "Public read calendar_cache"
+  ON public.calendar_cache FOR SELECT USING (true);
+
+-- ── economic_events — individual event cache ─────────────────────────────
+CREATE TABLE IF NOT EXISTS public.economic_events (
+  id               TEXT PRIMARY KEY,
+  title            TEXT NOT NULL,
+  currency         TEXT NOT NULL,
+  date_iso         TEXT NOT NULL,
+  datetime_utc     TIMESTAMPTZ,
+  time_label       TEXT,
+  impact           TEXT NOT NULL CHECK (impact IN ('High','Medium','Low','Non-Economic')),
+  actual           TEXT DEFAULT '',
+  forecast         TEXT DEFAULT '',
+  previous         TEXT DEFAULT '',
+  affected_symbols TEXT[] DEFAULT '{}',
+  fetched_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_economic_events_date
+  ON public.economic_events (date_iso, impact);
+CREATE INDEX IF NOT EXISTS idx_economic_events_datetime
+  ON public.economic_events (datetime_utc, impact);
+CREATE INDEX IF NOT EXISTS idx_economic_events_currency
+  ON public.economic_events (currency, date_iso);
+
+ALTER TABLE public.economic_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public read economic_events" ON public.economic_events;
+CREATE POLICY "Public read economic_events"
+  ON public.economic_events FOR SELECT USING (true);
+
+-- ── pg_cron: refresh calendar every 30 min on weekdays ───────────────────
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT jobid FROM cron.job WHERE jobname = 'refresh-calendar' LOOP
+    PERFORM cron.unschedule(r.jobid);
+  END LOOP;
+END;
+$$;
+
+SELECT cron.schedule(
+  'refresh-calendar',
+  '*/30 6-22 * * 1-5',
+  $$
+    SELECT net.http_get(
+      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/calendar?refresh=true',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+      )
+    );
+  $$
 );
