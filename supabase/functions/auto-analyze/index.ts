@@ -21,12 +21,21 @@ const CORS = {
 
 // ── Symbols to analyze ───────────────────────────────────────────────────────
 const SYMBOLS = [
+<<<<<<< HEAD
   { symbol: 'XAU/USD', yf: 'GC=F',     type: 'commodity', pip: 0.01,   currencies: ['USD', 'XAU'] },
   { symbol: 'EUR/USD', yf: 'EURUSD=X', type: 'forex',     pip: 0.0001, currencies: ['EUR', 'USD'] },
   { symbol: 'GBP/USD', yf: 'GBPUSD=X', type: 'forex',     pip: 0.0001, currencies: ['GBP', 'USD'] },
   { symbol: 'USD/JPY', yf: 'USDJPY=X', type: 'forex',     pip: 0.01,   currencies: ['USD', 'JPY'] },
   { symbol: 'NAS100',  yf: '^NDX',     type: 'index',     pip: 1.0,    currencies: ['USD'] },
   { symbol: 'BTC/USD', yf: 'BTC-USD',  type: 'crypto',    pip: 1.0,    currencies: [] }, // crypto ignores forex news
+=======
+  { symbol: 'XAU/USD', yf: 'GC=F',     type: 'commodity', pip: 0.01  },
+  { symbol: 'EUR/USD', yf: 'EURUSD=X', type: 'forex',     pip: 0.0001 },
+  { symbol: 'GBP/USD', yf: 'GBPUSD=X', type: 'forex',     pip: 0.0001 },
+  { symbol: 'USD/JPY', yf: 'USDJPY=X', type: 'forex',     pip: 0.01  },
+  { symbol: 'NAS100',  yf: '^NDX',     type: 'index',     pip: 1.0   },
+  { symbol: 'BTC/USD', yf: 'BTC-USD',  type: 'crypto',    pip: 1.0   },
+>>>>>>> f7cbe8bfd1ca4fad161eb5ac89b7a3d1431f50e0
 ];
 
 // ── News: fetch upcoming events from calendar function ───────────────────────
@@ -624,10 +633,13 @@ Deno.serve(async (req) => {
   const results: SignalResult[] = [];
   const errors: { symbol: string; error: string }[] = [];
 
+<<<<<<< HEAD
   // ── Fetch upcoming news events once for all symbols ──────────────────────
   const newsEvents = await fetchUpcomingNews(60);
   console.log(`[auto-analyze] fetched ${newsEvents.length} upcoming news events`);
 
+=======
+>>>>>>> f7cbe8bfd1ca4fad161eb5ac89b7a3d1431f50e0
   for (const sym of toAnalyze) {
     try {
       // ── Check news risk BEFORE fetching candles ─────────────────────────
@@ -693,6 +705,7 @@ Deno.serve(async (req) => {
 
       const narrative = await generateNarrative(sig, results.map(r => ({ ...r })));
 
+<<<<<<< HEAD
       results.push({
         ...sig,
         ai_narrative:  narrative,
@@ -701,6 +714,9 @@ Deno.serve(async (req) => {
         news_minutes:  newsRisk.minutesUntil,
         news_title:    newsRisk.newsTitle,
       });
+=======
+      results.push({ ...sig, ai_narrative: narrative });
+>>>>>>> f7cbe8bfd1ca4fad161eb5ac89b7a3d1431f50e0
 
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

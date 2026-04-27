@@ -2,7 +2,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.2';
 
 const SB_URL = Deno.env.get('SUPABASE_URL')!;
 const SB_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const TWELVE_DATA_KEY = Deno.env.get('TWELVE_DATA_KEY') || '';
 
 const sb = createClient(SB_URL, SB_SERVICE_KEY, {
   auth: { persistSession: false },
@@ -30,6 +29,7 @@ type SignalRow = {
   tp2: number | string | null;
   rr_tp1: number | string | null;
   rr_tp2: number | string | null;
+  risk_usd?: number | string | null;
   outcome: string;
   check_count: number | null;
 };
@@ -51,27 +51,27 @@ type OutcomeResult = {
   maeR: number | null;
 };
 
-const TD_SYMBOL: Record<string, string> = {
-  XAUUSD: 'XAU/USD',
-  'XAU/USD': 'XAU/USD',
-  GOLD: 'XAU/USD',
-  EURUSD: 'EUR/USD',
-  'EUR/USD': 'EUR/USD',
-  GBPUSD: 'GBP/USD',
-  'GBP/USD': 'GBP/USD',
-  USDJPY: 'USD/JPY',
-  'USD/JPY': 'USD/JPY',
-  GBPJPY: 'GBP/JPY',
-  'GBP/JPY': 'GBP/JPY',
-  BTCUSDT: 'BTC/USD',
-  BTCUSD: 'BTC/USD',
-  'BTC/USD': 'BTC/USD',
-  ETHUSDT: 'ETH/USD',
-  ETHUSD: 'ETH/USD',
-  'ETH/USD': 'ETH/USD',
-  NAS100: 'QQQ',
-  US100: 'QQQ',
-  NDX: 'QQQ',
+const YF_SYMBOL: Record<string, string> = {
+  XAUUSD: 'GC=F',
+  'XAU/USD': 'GC=F',
+  GOLD: 'GC=F',
+  EURUSD: 'EURUSD=X',
+  'EUR/USD': 'EURUSD=X',
+  GBPUSD: 'GBPUSD=X',
+  'GBP/USD': 'GBPUSD=X',
+  USDJPY: 'USDJPY=X',
+  'USD/JPY': 'USDJPY=X',
+  GBPJPY: 'GBPJPY=X',
+  'GBP/JPY': 'GBPJPY=X',
+  BTCUSDT: 'BTC-USD',
+  BTCUSD: 'BTC-USD',
+  'BTC/USD': 'BTC-USD',
+  ETHUSDT: 'ETH-USD',
+  ETHUSD: 'ETH-USD',
+  'ETH/USD': 'ETH-USD',
+  NAS100: '^NDX',
+  US100: '^NDX',
+  NDX: '^NDX',
   QQQ: 'QQQ',
   SPY: 'SPY',
   AAPL: 'AAPL',
@@ -83,6 +83,19 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS, 'Content-Type': 'application/json' },
   });
+}
+
+async function authorizeAction(req: Request): Promise<Response | null> {
+  const cronSecret = Deno.env.get('PROPILOT_CRON_SECRET') || Deno.env.get('APP_CRON_SECRET') || '';
+  if (cronSecret && req.headers.get('x-proppilot-cron-secret') === cronSecret) return null;
+
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return json({ error: 'Unauthorized' }, 401);
+  if (token === SB_SERVICE_KEY) return null;
+
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data.user) return json({ error: 'Unauthorized' }, 401);
+  return null;
 }
 
 function n(value: unknown): number | null {
@@ -114,52 +127,55 @@ function needsMarketData(signal: SignalRow): boolean {
   );
 }
 
-function tdSymbol(symbol: string): string {
+function yfSymbol(symbol: string): string {
   const key = symbol.toUpperCase().replace(/\s/g, '');
-  return TD_SYMBOL[key] || TD_SYMBOL[symbol] || symbol;
+  return YF_SYMBOL[key] || YF_SYMBOL[symbol] || symbol;
 }
 
-function intervalForAge(hours: number): string {
-  if (hours <= 96) return '15min';
-  if (hours <= 24 * 21) return '1h';
-  return '4h';
+function intervalForAge(hours: number): '15min' | '1h' | '1d' {
+  if (hours <= 24 * 5) return '15min';
+  if (hours <= 24 * 30) return '1h';
+  return '1d';
 }
 
-function outputSizeFor(hours: number, interval: string): number {
-  const candlesPerHour = interval === '15min' ? 4 : interval === '1h' ? 1 : 0.25;
+function outputSizeFor(hours: number, interval: '15min' | '1h' | '1d'): number {
+  const candlesPerHour = interval === '15min' ? 4 : interval === '1h' ? 1 : 1 / 24;
   return Math.min(5000, Math.max(80, Math.ceil(hours * candlesPerHour) + 24));
 }
 
 async function fetchCandles(symbol: string, hours: number): Promise<Candle[]> {
-  if (!TWELVE_DATA_KEY) {
-    throw new Error('TWELVE_DATA_KEY is not configured');
-  }
-
   const interval = intervalForAge(hours);
   const outputsize = outputSizeFor(hours, interval);
-  const url = new URL('https://api.twelvedata.com/time_series');
-  url.searchParams.set('symbol', tdSymbol(symbol));
-  url.searchParams.set('interval', interval);
-  url.searchParams.set('outputsize', String(outputsize));
-  url.searchParams.set('apikey', TWELVE_DATA_KEY);
-  url.searchParams.set('format', 'JSON');
+  const iv = interval === '15min'
+    ? { interval: '15m', range: '5d' }
+    : interval === '1h'
+      ? { interval: '1h', range: '30d' }
+      : { interval: '1d', range: '1y' };
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSymbol(symbol))}?interval=${iv.interval}&range=${iv.range}&includePrePost=false`;
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(9000) });
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    signal: AbortSignal.timeout(9000),
+  });
+  if (!res.ok) throw new Error(`Yahoo Finance HTTP ${res.status} for ${symbol}`);
   const data = await res.json();
-  if (!res.ok || data.status === 'error') {
-    throw new Error(data.message || `Twelve Data error for ${symbol}`);
-  }
-  if (!Array.isArray(data.values)) {
-    throw new Error(`No candles returned for ${symbol}`);
-  }
+  const result = data?.chart?.result?.[0];
+  if (!result) throw new Error(`No candles returned for ${symbol}`);
 
-  return data.values
-    .map((v: Record<string, string>) => ({
-      time: Date.parse(`${v.datetime}Z`),
-      open: Number(v.open),
-      high: Number(v.high),
-      low: Number(v.low),
-      close: Number(v.close),
+  const timestamps: number[] = result.timestamp || [];
+  const quote = result.indicators?.quote?.[0] || {};
+  const opens: number[] = quote.open || [];
+  const highs: number[] = quote.high || [];
+  const lows: number[] = quote.low || [];
+  const closes: number[] = quote.close || [];
+
+  return timestamps
+    .map((ts, i) => ({
+      time: ts * 1000,
+      open: Number(opens[i]),
+      high: Number(highs[i]),
+      low: Number(lows[i]),
+      close: Number(closes[i]),
     }))
     .filter((c: Candle) =>
       Number.isFinite(c.time) &&
@@ -168,6 +184,7 @@ async function fetchCandles(symbol: string, hours: number): Promise<Candle[]> {
       Number.isFinite(c.low) &&
       Number.isFinite(c.close)
     )
+    .slice(-outputsize)
     .sort((a: Candle, b: Candle) => a.time - b.time);
 }
 
@@ -329,6 +346,8 @@ async function syncSmcSignals(): Promise<number> {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  const authError = await authorizeAction(req);
+  if (authError) return authError;
 
   const started = Date.now();
   const body = req.method === 'POST'
@@ -473,7 +492,7 @@ Deno.serve(async (req) => {
                 direction: signal.direction,
                 pnl_r:     outcome.pnlR,
                 pnl_usd:   signal.risk_usd != null && outcome.pnlR != null
-                             ? signal.risk_usd * outcome.pnlR : null,
+                             ? (Number(signal.risk_usd) || 0) * outcome.pnlR : null,
               },
             }),
           }).catch(e => console.warn('[telegram-push] failed:', e.message));

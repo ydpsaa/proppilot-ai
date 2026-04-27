@@ -1,126 +1,61 @@
-#!/bin/bash
-# ═══════════════════════════════════════════════════════════════════════════
-# PropPilot AI — Deploy Script
-# Запусти один раз: bash deploy.sh
-# ═══════════════════════════════════════════════════════════════════════════
+#!/usr/bin/env bash
+# PropPilot AI — One-Command Deploy Script
 set -e
 
-PROJECT_REF="nxiednydxyrtxpkmgtof"
-TD_KEY="552e649e1b1f4bba97d590c37e981118"
+PROJECT_REF="${SUPABASE_PROJECT_REF:-nxiednydxyrtxpkmgtof}"
+SUPABASE_URL="https://${PROJECT_REF}.supabase.co"
+FUNCTIONS=(market-data auto-analyze candles calendar update-outcomes update-strategy-stats update-paper-positions execute-paper-trade telegram-bot)
 
-echo ""
-echo "╔══════════════════════════════════════════╗"
-echo "║     PropPilot AI — Full Deploy           ║"
-echo "╚══════════════════════════════════════════╝"
-echo ""
+echo "🚀 PropPilot AI Deploy — Project: ${PROJECT_REF}"
 
-# ── Step 1: Git ──────────────────────────────────────────────────────────────
-echo "▶ 1/6  Git init + commit..."
-if [ ! -d ".git" ]; then
-  git init
-fi
-git add -A
-git commit -m "PropPilot AI — deploy $(date +%Y-%m-%d)" || echo "(nothing to commit)"
-
-# ── Step 2: Vercel ────────────────────────────────────────────────────────────
-echo ""
-echo "▶ 2/6  Vercel deploy..."
-if command -v vercel &>/dev/null; then
-  vercel --prod --yes
-else
-  echo "  ⚠ vercel not found. Install: npm i -g vercel"
-  echo "  Then run: vercel --prod"
+# Step 0: generate secret if missing
+if [ -z "$PROPILOT_CRON_SECRET" ]; then
+  export PROPILOT_CRON_SECRET=$(openssl rand -hex 32)
+  echo "⚡ Generated PROPILOT_CRON_SECRET: $PROPILOT_CRON_SECRET"
+  echo "   ⚠️  SAVE IT — you need it for the SQL Editor step!"
 fi
 
-# ── Step 3: Supabase CLI ──────────────────────────────────────────────────────
-echo ""
-echo "▶ 3/6  Installing Supabase CLI if needed..."
-if ! command -v supabase &>/dev/null; then
-  if command -v brew &>/dev/null; then
-    brew install supabase/tap/supabase
-  elif command -v npm &>/dev/null; then
-    npm install -g supabase
-  else
-    echo "  ✗ Cannot install supabase CLI automatically."
-    echo "  Install manually: https://supabase.com/docs/guides/cli/getting-started"
-    exit 1
-  fi
-fi
+# Step 1: link project
+supabase link --project-ref "$PROJECT_REF" || true
 
-# ── Step 4: Link project ──────────────────────────────────────────────────────
-echo ""
-echo "▶ 4/6  Linking Supabase project $PROJECT_REF..."
-supabase link --project-ref "$PROJECT_REF"
+# Step 2: set secrets
+supabase secrets set PROPILOT_CRON_SECRET="$PROPILOT_CRON_SECRET"
+[ -n "$GROQ_API_KEY" ] && supabase secrets set GROQ_API_KEY="$GROQ_API_KEY" && echo "✅ GROQ_API_KEY set"
+[ -n "$TELEGRAM_BOT_TOKEN" ] && supabase secrets set TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN" TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 
-# ── Step 5: Secrets ───────────────────────────────────────────────────────────
-echo ""
-echo "▶ 5/6  Setting secrets..."
-supabase secrets set TWELVE_DATA_KEY="$TD_KEY"
-
-# Set GROQ_API_KEY if provided
-if [ -n "$GROQ_API_KEY" ]; then
-  supabase secrets set GROQ_API_KEY="$GROQ_API_KEY"
-  echo "  ✓ GROQ_API_KEY set"
-else
-  echo "  ⚠ GROQ_API_KEY not set. Set it manually:"
-  echo "    supabase secrets set GROQ_API_KEY=<your_key>"
-fi
-
-# Set Telegram secrets if provided
-if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
-  supabase secrets set TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
-  echo "  ✓ TELEGRAM_BOT_TOKEN set"
-else
-  echo "  ⚠ TELEGRAM_BOT_TOKEN not set. To enable Telegram push:"
-  echo "    1. Message @BotFather on Telegram → /newbot"
-  echo "    2. supabase secrets set TELEGRAM_BOT_TOKEN=<token>"
-  echo "    3. supabase secrets set TELEGRAM_CHAT_ID=<your_chat_id>"
-fi
-if [ -n "$TELEGRAM_CHAT_ID" ]; then
-  supabase secrets set TELEGRAM_CHAT_ID="$TELEGRAM_CHAT_ID"
-  echo "  ✓ TELEGRAM_CHAT_ID set"
-fi
-
-# ── Step 6: Deploy Edge Functions ─────────────────────────────────────────────
-echo ""
-echo "▶ 6/6  Deploying Edge Functions..."
-
-FUNCTIONS=(
-  "auto-analyze"
-  "update-outcomes"
-  "update-strategy-stats"
-  "update-paper-positions"
-  "execute-paper-trade"
-  "telegram-bot"
-)
-
+# Step 3: deploy 9 Edge Functions
+echo "▶ Deploying Edge Functions..."
 for fn in "${FUNCTIONS[@]}"; do
-  echo "  → Deploying $fn..."
+  echo "  → $fn"
   supabase functions deploy "$fn" --no-verify-jwt
-  echo "  ✓ $fn deployed"
 done
+echo "✅ All 9 functions deployed"
 
-# ── Done ──────────────────────────────────────────────────────────────────────
+# Step 4: SQL reminder
 echo ""
-echo "╔══════════════════════════════════════════╗"
-echo "║           DEPLOY COMPLETE! ✓             ║"
-echo "╚══════════════════════════════════════════╝"
+echo "════════════════════════════════════════════════════════════"
+echo "📋 SQL STEP — open this URL and paste SUPABASE_SETUP.sql:"
+echo "   https://supabase.com/dashboard/project/${PROJECT_REF}/sql/new"
 echo ""
-echo "NEXT STEP: Run SQL migration in Supabase Dashboard"
-echo "→ https://supabase.com/dashboard/project/$PROJECT_REF/sql/new"
-echo "→ Open file: supabase/SETUP_ALL.sql"
-echo "→ Paste contents → Run"
+echo "   1. Replace YOUR_CRON_SECRET_HERE → $PROPILOT_CRON_SECRET"
+echo "   2. Run the query"
+echo "   3. Verify: SELECT jobname FROM cron.job ORDER BY jobname;"
+echo "════════════════════════════════════════════════════════════"
+
+# Step 5: push to GitHub
+git add -A
+git commit -m "feat: complete PropPilot AI deployment" || true
+git push origin main
+echo "✅ Pushed to GitHub — Vercel auto-deploy triggered"
+
+# Step 6: smoke tests
 echo ""
-echo "Then test Edge Functions:"
-echo "  curl https://$PROJECT_REF.supabase.co/functions/v1/auto-analyze"
-echo "  curl https://$PROJECT_REF.supabase.co/functions/v1/update-outcomes"
+echo "▶ Smoke tests..."
+curl -sf "${SUPABASE_URL}/functions/v1/market-data?type=price&symbol=XAU/USD" | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅ market-data:', d.get('prices',{}))" 2>/dev/null || echo "⚠️  market-data cold-start, retry in 30s"
+
+curl -sf -X POST -H "Content-Type: application/json" -H "x-proppilot-cron-secret: $PROPILOT_CRON_SECRET" -d '{"dryRun":true}' "${SUPABASE_URL}/functions/v1/auto-analyze" | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅ auto-analyze:', d.get('totalSignals',d.get('ok')))" 2>/dev/null || echo "⚠️  auto-analyze: check cron secret matches"
+
+curl -sf -X POST -H "x-proppilot-cron-secret: $PROPILOT_CRON_SECRET" "${SUPABASE_URL}/functions/v1/update-paper-positions" | python3 -c "import sys,json; d=json.load(sys.stdin); print('✅ positions:', d)" 2>/dev/null || echo "⚠️  update-paper-positions failed"
+
 echo ""
-echo "TELEGRAM BOT SETUP (push notifications):"
-echo "  1. Open @BotFather on Telegram → /newbot → copy token"
-echo "  2. supabase secrets set TELEGRAM_BOT_TOKEN=<token>"
-echo "  3. Send your bot a message → /start → check logs for chat_id:"
-echo "     supabase functions logs telegram-bot --tail"
-echo "  4. supabase secrets set TELEGRAM_CHAT_ID=<chat_id>"
-echo "  5. Register webhook:"
-echo "     curl 'https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://$PROJECT_REF.supabase.co/functions/v1/telegram-bot'"
-echo ""
+echo "✅ Done! App: https://proppilot-ai.vercel.app"

@@ -8,7 +8,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.2';
 
 const SB_URL  = Deno.env.get('SUPABASE_URL')!;
 const SB_SKEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const TD_KEY  = Deno.env.get('TWELVE_DATA_KEY') || '';
 
 const sb = createClient(SB_URL, SB_SKEY);
 
@@ -29,49 +28,36 @@ const CONTRACT_SIZE: Record<string, number> = {
   'ETH/USD': 1,
 };
 
-// Twelve Data symbol map
-const TD_SYMBOL: Record<string, string> = {
-  'XAU/USD': 'XAU/USD',
-  'EUR/USD': 'EUR/USD',
-  'GBP/USD': 'GBP/USD',
-  'USD/JPY': 'USD/JPY',
-  'NAS100':  'NDX',
-  'BTC/USD': 'BTC/USD',
-  'ETH/USD': 'ETH/USD',
+// Yahoo Finance symbol map
+const YF_SYMBOL: Record<string, string> = {
+  'XAU/USD': 'GC=F',
+  'EUR/USD': 'EURUSD=X',
+  'GBP/USD': 'GBPUSD=X',
+  'USD/JPY': 'USDJPY=X',
+  'GBP/JPY': 'GBPJPY=X',
+  'NAS100':  '^NDX',
+  'BTC/USD': 'BTC-USD',
+  'ETH/USD': 'ETH-USD',
 };
 
-// Fetch live price from Twelve Data (or fallback to demo)
+// Fetch live price from Yahoo Finance. Returns null instead of synthetic data so
+// cron runs never close positions from fake prices.
 async function fetchPrice(symbol: string): Promise<number | null> {
-  if (!TD_KEY) return demoPrice(symbol);
-
-  const tdSym = TD_SYMBOL[symbol] || symbol;
+  const yfSym = YF_SYMBOL[symbol] || symbol;
   try {
-    const r = await fetch(
-      `https://api.twelvedata.com/price?symbol=${encodeURIComponent(tdSym)}&apikey=${TD_KEY}`,
-      { signal: AbortSignal.timeout(5000) }
-    );
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSym)}?interval=1m&range=1d`;
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!r.ok) return null;
     const d = await r.json();
-    const price = parseFloat(d.price);
-    if (!isNaN(price) && price > 0) return price;
-  } catch { /* fallthrough to demo */ }
-
-  return demoPrice(symbol);
-}
-
-// Demo prices (used when no API key or API fails)
-function demoPrice(symbol: string): number {
-  const base: Record<string, number> = {
-    'XAU/USD': 2345.0,
-    'EUR/USD': 1.0850,
-    'GBP/USD': 1.2700,
-    'USD/JPY': 149.50,
-    'NAS100':  17800.0,
-    'BTC/USD': 67000.0,
-    'ETH/USD': 3500.0,
-  };
-  const b = base[symbol] || 1.0;
-  // Small random walk ±0.1%
-  return b * (1 + (Math.random() - 0.5) * 0.002);
+    const meta = d?.chart?.result?.[0]?.meta;
+    const price = Number(meta?.regularMarketPrice ?? meta?.previousClose);
+    return Number.isFinite(price) && price > 0 ? price : null;
+  } catch {
+    return null;
+  }
 }
 
 // Calculate P&L in USD
@@ -91,10 +77,32 @@ function calcPnl(pos: Record<string, number | string>, currentPrice: number): { 
   return { pnl_usd: +pnl_usd.toFixed(2), pnl_r: +pnl_r.toFixed(3) };
 }
 
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, 'Content-Type': 'application/json' },
+  });
+}
+
+async function authorizeAction(req: Request): Promise<Response | null> {
+  const cronSecret = Deno.env.get('PROPILOT_CRON_SECRET') || Deno.env.get('APP_CRON_SECRET') || '';
+  if (cronSecret && req.headers.get('x-proppilot-cron-secret') === cronSecret) return null;
+
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return json({ error: 'Unauthorized' }, 401);
+  if (token === SB_SKEY) return null;
+
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data.user) return json({ error: 'Unauthorized' }, 401);
+  return null;
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  const authError = await authorizeAction(req);
+  if (authError) return authError;
 
   const now = new Date().toISOString();
   let updated = 0, closed = 0;

@@ -76,50 +76,73 @@ interface EnrichedEvent {
   trading_advice:   string;
 }
 
-function parseFFDate(dateStr: string, timeStr: string): string | null {
-  // dateStr: "04-28-2026" => ISO "2026-04-28"
-  // timeStr: "8:30am", "12:00pm", "All Day", "Tentative"
-  try {
-    const [mm, dd, yyyy] = dateStr.split('-');
-    if (!mm || !dd || !yyyy) return null;
+// ── Parse FF date — handles both ISO "2026-05-01T02:00:00" and "04-28-2026" ──
+function parseDateField(dateStr: string, timeStr: string): { dateIso: string; datetimeUtc: string | null } {
+  if (!dateStr) return { dateIso: '', datetimeUtc: null };
 
-    if (!timeStr || timeStr === 'All Day' || timeStr === 'Tentative') {
-      return `${yyyy}-${mm}-${dd}T00:00:00.000Z`;
+  try {
+    // ISO format: "2026-05-01T02:00:00" or "2026-05-01T02:00:00-04:00"
+    if (dateStr.includes('T')) {
+      const dateIso = dateStr.slice(0, 10); // "2026-05-01"
+      const dt = new Date(dateStr);
+      return {
+        dateIso,
+        datetimeUtc: isNaN(dt.getTime()) ? null : dt.toISOString(),
+      };
     }
 
-    // Parse "8:30am" → hours/minutes
-    const match = timeStr.match(/^(\d+):(\d+)(am|pm)$/i);
-    if (!match) return null;
+    // ISO date only: "2026-05-01"
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const dateIso = dateStr;
+      if (!timeStr || timeStr === 'All Day' || timeStr === 'Tentative') {
+        return { dateIso, datetimeUtc: `${dateIso}T00:00:00.000Z` };
+      }
+      const match = timeStr.match(/^(\d+):(\d+)(am|pm)$/i);
+      if (!match) return { dateIso, datetimeUtc: `${dateIso}T00:00:00.000Z` };
+      let hours = parseInt(match[1]);
+      const minutes = parseInt(match[2]);
+      const meridiem = match[3].toLowerCase();
+      if (meridiem === 'pm' && hours !== 12) hours += 12;
+      if (meridiem === 'am' && hours === 12) hours = 0;
+      const month = new Date().getMonth() + 1;
+      const offsetHours = (month >= 3 && month <= 10) ? 4 : 5;
+      const utcHours = hours + offsetHours;
+      const hStr = String(utcHours).padStart(2, '0');
+      const mStr = String(minutes).padStart(2, '0');
+      return { dateIso, datetimeUtc: `${dateIso}T${hStr}:${mStr}:00.000Z` };
+    }
 
-    let hours = parseInt(match[1]);
-    const minutes = parseInt(match[2]);
-    const meridiem = match[3].toLowerCase();
+    // Legacy MM-DD-YYYY: "04-28-2026"
+    const parts = dateStr.split('-');
+    if (parts.length === 3 && parts[2].length === 4) {
+      const [mm, dd, yyyy] = parts;
+      const dateIso = `${yyyy}-${mm}-${dd}`;
+      if (!timeStr || timeStr === 'All Day' || timeStr === 'Tentative') {
+        return { dateIso, datetimeUtc: `${dateIso}T00:00:00.000Z` };
+      }
+      const match = timeStr.match(/^(\d+):(\d+)(am|pm)$/i);
+      if (!match) return { dateIso, datetimeUtc: `${dateIso}T00:00:00.000Z` };
+      let hours = parseInt(match[1]);
+      const minutes = parseInt(match[2]);
+      const meridiem = match[3].toLowerCase();
+      if (meridiem === 'pm' && hours !== 12) hours += 12;
+      if (meridiem === 'am' && hours === 12) hours = 0;
+      const month = new Date().getMonth() + 1;
+      const offsetHours = (month >= 3 && month <= 10) ? 4 : 5;
+      const utcHours = hours + offsetHours;
+      const hStr = String(utcHours).padStart(2, '0');
+      const mStr = String(minutes).padStart(2, '0');
+      return { dateIso, datetimeUtc: `${dateIso}T${hStr}:${mStr}:00.000Z` };
+    }
 
-    if (meridiem === 'pm' && hours !== 12) hours += 12;
-    if (meridiem === 'am' && hours === 12) hours = 0;
-
-    // FF times are Eastern Time (ET) = UTC-4 or UTC-5 depending on DST
-    // Use UTC-4 (EDT) as default for April-October
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const offsetHours = (month >= 3 && month <= 10) ? 4 : 5; // EDT vs EST
-
-    const utcHours = hours + offsetHours;
-    const hStr = String(utcHours).padStart(2, '0');
-    const mStr = String(minutes).padStart(2, '0');
-
-    return `${yyyy}-${mm}-${dd}T${hStr}:${mStr}:00.000Z`;
+    return { dateIso: '', datetimeUtc: null };
   } catch {
-    return null;
+    return { dateIso: '', datetimeUtc: null };
   }
 }
 
 function enrichEvent(e: FFEvent): EnrichedEvent {
-  const dateIso = e.date
-    ? (() => { const [mm, dd, yyyy] = e.date.split('-'); return `${yyyy}-${mm}-${dd}`; })()
-    : '';
-
-  const datetimeUtc = parseFFDate(e.date, e.time);
+  const { dateIso, datetimeUtc } = parseDateField(e.date, e.time);
   const now = Date.now();
   const eventMs = datetimeUtc ? new Date(datetimeUtc).getTime() : null;
   const minutesUntil = eventMs != null ? Math.round((eventMs - now) / 60000) : null;
