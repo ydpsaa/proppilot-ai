@@ -487,7 +487,7 @@ const DEFAULT_TRADES = [
 // ═══════════════════════════════════════════════════════════════════════════
 
 const T = {
-  amber:'#F59E0B', yellow:'#EAB308', indigo:'#3B82F6', violet:'#8B5CF6',
+  amber:'#F59E0B', yellow:'#EAB308', indigo:'#3B82F6', blue:'#3B82F6', violet:'#8B5CF6',
   green:'#10B981', teal:'#14B8A6',   red:'#EF4444',    cyan:'#06B6D4',
   bg:'#05070f', text:'#F1F5F9', sub:'#94A3B8', muted:'#4B5A72',
   border:'rgba(255,255,255,0.1)', surf:'rgba(255,255,255,0.045)',
@@ -532,6 +532,30 @@ function RiskBar({ label, value, max, sublabel }) {
 
 function safeNum(v, fallback = null) {
   return v == null || v === '' || Number.isNaN(Number(v)) ? fallback : Number(v);
+}
+
+const INSTRUMENT_SPECS = {
+  'XAU/USD': { contractSize: 100, pipSize: 0.01, label: 'lots' },
+  XAUUSD: { contractSize: 100, pipSize: 0.01, label: 'lots' },
+  NAS100: { contractSize: 20, pipSize: 1, label: 'lots' },
+  'EUR/USD': { contractSize: 100000, pipSize: 0.0001, label: 'lots' },
+  EURUSD: { contractSize: 100000, pipSize: 0.0001, label: 'lots' },
+  'GBP/USD': { contractSize: 100000, pipSize: 0.0001, label: 'lots' },
+  GBPUSD: { contractSize: 100000, pipSize: 0.0001, label: 'lots' },
+  'USD/JPY': { contractSize: 100000, pipSize: 0.01, label: 'lots' },
+  USDJPY: { contractSize: 100000, pipSize: 0.01, label: 'lots' },
+  'GBP/JPY': { contractSize: 100000, pipSize: 0.01, label: 'lots' },
+  GBPJPY: { contractSize: 100000, pipSize: 0.01, label: 'lots' },
+  'BTC/USD': { contractSize: 1, pipSize: 1, label: 'coins' },
+  BTCUSD: { contractSize: 1, pipSize: 1, label: 'coins' },
+  'ETH/USD': { contractSize: 1, pipSize: 0.1, label: 'coins' },
+  ETHUSD: { contractSize: 1, pipSize: 0.1, label: 'coins' },
+};
+
+function getInstrumentSpec(symbol) {
+  const raw = String(symbol || '').toUpperCase();
+  const compact = raw.replace(/\//g, '');
+  return INSTRUMENT_SPECS[raw] || INSTRUMENT_SPECS[compact] || { contractSize: 100000, pipSize: compact.endsWith('JPY') ? 0.01 : 0.0001, label: 'lots' };
 }
 
 function fmtUsd(v, digits = 0) {
@@ -3080,19 +3104,25 @@ function Journal({ trades, setTrades, plan }) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const INST_MAP = {
-  XAUUSD: { label:'XAU/USD', group:'metals',  pipVal:1,    pipUnit:'pips ($0.01)',  defSL:30,  icon:'🥇' },
-  XAGUSD: { label:'XAG/USD', group:'metals',  pipVal:0.5,  pipUnit:'pips ($0.01)',  defSL:50,  icon:'⚪' },
-  EURUSD: { label:'EUR/USD', group:'forex',   pipVal:10,   pipUnit:'pips (0.0001)', defSL:25,  icon:'💶' },
-  GBPUSD: { label:'GBP/USD', group:'forex',   pipVal:10,   pipUnit:'pips (0.0001)', defSL:30,  icon:'💷' },
-  USDJPY: { label:'USD/JPY', group:'forex',   pipVal:9.1,  pipUnit:'pips (0.01)',   defSL:25,  icon:'¥'  },
-  GBPJPY: { label:'GBP/JPY', group:'forex',   pipVal:9.1,  pipUnit:'pips (0.01)',   defSL:40,  icon:'¥'  },
-  AUDUSD: { label:'AUD/USD', group:'forex',   pipVal:10,   pipUnit:'pips (0.0001)', defSL:20,  icon:'🦘' },
-  USDCAD: { label:'USD/CAD', group:'forex',   pipVal:7.4,  pipUnit:'pips (0.0001)', defSL:25,  icon:'🍁' },
-  NAS100: { label:'NAS100',  group:'indices', pipVal:1,    pipUnit:'points',        defSL:30,  icon:'📈' },
-  US30:   { label:'US30',    group:'indices', pipVal:1,    pipUnit:'points',        defSL:50,  icon:'🏦' },
-  US500:  { label:'S&P500',  group:'indices', pipVal:1,    pipUnit:'points',        defSL:15,  icon:'📊' },
-  BTCUSD: { label:'BTC/USD', group:'crypto',  pipVal:0.1,  pipUnit:'$100 moves',   defSL:20,  icon:'₿'  },
+  XAUUSD: { label:'XAU/USD', group:'metals',  pipVal:1,  pipUnit:'pips ($0.01)',  defSL:300,  icon:'🥇' },
+  XAGUSD: { label:'XAG/USD', group:'metals',  pipVal:50, pipUnit:'pips ($0.01)',  defSL:50,   icon:'⚪' },
+  EURUSD: { label:'EUR/USD', group:'forex',   pipVal:10, pipUnit:'pips (0.0001)', defSL:25,   icon:'💶' },
+  GBPUSD: { label:'GBP/USD', group:'forex',   pipVal:10, pipUnit:'pips (0.0001)', defSL:30,   icon:'💷' },
+  USDJPY: { label:'USD/JPY', group:'forex',   pipVal:1000, pipUnit:'pips (0.01)',   defSL:25,   icon:'¥'  },
+  GBPJPY: { label:'GBP/JPY', group:'forex',   pipVal:1000, pipUnit:'pips (0.01)',   defSL:40,   icon:'¥'  },
+  AUDUSD: { label:'AUD/USD', group:'forex',   pipVal:10, pipUnit:'pips (0.0001)', defSL:20,   icon:'🦘' },
+  USDCAD: { label:'USD/CAD', group:'forex',   pipVal:10, pipUnit:'pips (0.0001)', defSL:25,   icon:'🍁' },
+  NAS100: { label:'NAS100',  group:'indices', pipVal:20, pipUnit:'points',        defSL:30,   icon:'📈' },
+  US30:   { label:'US30',    group:'indices', pipVal:1,  pipUnit:'points',        defSL:50,   icon:'🏦' },
+  US500:  { label:'S&P500',  group:'indices', pipVal:1,  pipUnit:'points',        defSL:15,   icon:'📊' },
+  BTCUSD: { label:'BTC/USD', group:'crypto',  pipVal:1,  pipUnit:'$1 moves',      defSL:1000, icon:'₿'  },
 };
+const INST_GROUPS = [
+  { id:'metals', label:'Metals' },
+  { id:'forex', label:'Forex' },
+  { id:'indices', label:'Indices' },
+  { id:'crypto', label:'Crypto' },
+];
 
 function RiskCalc({ account }) {
   // ── Read challenge for real-time account data ─────────────────────────────
@@ -3121,6 +3151,7 @@ function RiskCalc({ account }) {
   const [dir,     setDir]     = useState('LONG');
   const [manual,  setManual]  = useState(false);
   const [custSz,  setCustSz]  = useState(() => chSize.toString());
+  const [instGroup, setInstGroup] = useState(() => INST_MAP.XAUUSD.group);
 
   const inst      = INST_MAP[sym];
   const size      = manual ? (parseFloat(custSz) || chSize) : chSize;
@@ -3143,6 +3174,7 @@ function RiskCalc({ account }) {
     (acc[v.group] = acc[v.group] || []).push([id, v]);
     return acc;
   }, {});
+  const activeGroupItems = grouped[instGroup] || [];
 
   const inpSt = { width:'100%', padding:'10px 12px', background:'rgba(255,255,255,0.06)', border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:14, outline:'none', fontFamily:'inherit', boxSizing:'border-box' };
 
@@ -3173,19 +3205,25 @@ function RiskCalc({ account }) {
           {/* Instrument picker */}
           <div style={{ ...card }}>
             <div style={{ color:T.muted, fontSize:11, fontWeight:700, letterSpacing:'0.09em', marginBottom:14, textTransform:'uppercase' }}>Instrument</div>
-            {Object.entries(grouped).map(([group, items]) => (
-              <div key={group} style={{ marginBottom:14 }}>
-                <div style={{ color:T.muted, fontSize:10, fontWeight:700, letterSpacing:'0.1em', textTransform:'uppercase', marginBottom:8 }}>{group}</div>
-                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                  {items.map(([id, m]) => (
-                    <button key={id} onClick={() => { setSym(id); setSlPips(''); setTpPips(''); }}
-                      style={{ padding:'7px 11px', borderRadius:8, cursor:'pointer', border:`1px solid ${sym===id?T.amber:T.border}`, background:sym===id?'rgba(245,166,35,0.12)':'rgba(255,255,255,0.02)', color:sym===id?T.amber:T.sub, fontSize:12, fontWeight:sym===id?700:400, transition:'all 0.15s', whiteSpace:'nowrap' }}>
-                      {m.icon} {m.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:6, marginBottom:12 }}>
+              {INST_GROUPS.map(g => {
+                const isActive = instGroup === g.id;
+                return (
+                  <button key={g.id} onClick={() => setInstGroup(g.id)}
+                    style={{ minHeight:34, padding:'7px 8px', borderRadius:8, cursor:'pointer', border:`1px solid ${isActive?T.amber:T.border}`, background:isActive?'rgba(245,166,35,0.12)':'rgba(255,255,255,0.025)', color:isActive?T.amber:T.sub, fontSize:11, fontWeight:800, transition:'all 0.15s', whiteSpace:'nowrap' }}>
+                    {g.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(104px,1fr))', gap:7 }}>
+              {activeGroupItems.map(([id, m]) => (
+                <button key={id} onClick={() => { setSym(id); setInstGroup(m.group); setSlPips(''); setTpPips(''); }}
+                  style={{ minHeight:36, padding:'7px 10px', borderRadius:8, cursor:'pointer', border:`1px solid ${sym===id?T.amber:T.border}`, background:sym===id?'rgba(245,166,35,0.12)':'rgba(255,255,255,0.02)', color:sym===id?T.amber:T.sub, fontSize:12, fontWeight:sym===id?800:600, transition:'all 0.15s', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                  {m.icon} {m.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Parameters */}
@@ -3617,27 +3655,7 @@ function PosSizer({ symbol = '', entry = 0, sl = 0, tp1 = 0, tp2 = 0, accountBal
   const slDist = Math.abs(entry - sl);
   if (!entry || !sl || slDist === 0) return null;
 
-  // Detect instrument type to calculate lot/unit size
-  const sym = (symbol || '').toUpperCase();
-  let contractSize, pipSize, pipLabel;
-  if (sym.includes('XAU') || sym.includes('GOLD')) {
-    contractSize = 100;   // 100 oz per standard lot
-    pipSize      = 0.01;  // $0.01 gold price = 1 pip
-    pipLabel     = 'lots';
-  } else if (sym.includes('NAS') || sym.includes('NDX') || sym.includes('US30') || sym.includes('SPX') || sym.includes('DAX')) {
-    contractSize = 1;     // 1 contract = 1 index unit
-    pipSize      = 1;     // 1 point = 1 pip
-    pipLabel     = 'contracts';
-  } else if (sym.length === 6 && /^[A-Z]+$/.test(sym)) {
-    // Forex pair
-    contractSize = 100000; // standard lot
-    pipSize      = sym.endsWith('JPY') ? 0.01 : 0.0001;
-    pipLabel     = 'lots';
-  } else {
-    contractSize = 1;
-    pipSize      = 1;
-    pipLabel     = 'units';
-  }
+  const { contractSize, pipSize, label: pipLabel } = getInstrumentSpec(symbol);
 
   const riskUsd   = accountBalance * (riskPct / 100);
   const slPips    = slDist / pipSize;
@@ -4522,6 +4540,43 @@ function SignalsWorkspace({ onNavigate }) {
   const [demoMode, setDemoMode] = useState(false);
   const ranOnce = React.useRef(false);
 
+  // ── Algo Engine: fetch latest SMC signal + open positions for this symbol ──
+  const [algoSignal,    setAlgoSignal]    = useState(null);
+  const [algoPosition,  setAlgoPosition]  = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        // Latest SMC signal for this symbol
+        const sigRes = await fetch(
+          `${SB_URL}/rest/v1/smc_signals?symbol=eq.${encodeURIComponent(sym)}&select=verdict,confidence,htf_trend,sweep_occurred,mss_occurred,reasoning_codes,session_name,created_at&order=created_at.desc&limit=1`,
+          { headers: SB_HDR }
+        );
+        const sigData = await sigRes.json();
+        if (!cancelled && Array.isArray(sigData) && sigData.length) {
+          setAlgoSignal(sigData[0]);
+        } else if (!cancelled) {
+          setAlgoSignal(null);
+        }
+
+        // Open paper position for this symbol
+        const posRes = await fetch(
+          `${SB_URL}/rest/v1/paper_positions?symbol=eq.${encodeURIComponent(sym)}&status=eq.OPEN&select=direction,entry_price,sl_price,tp1_price,confidence,opened_at&order=opened_at.desc&limit=1`,
+          { headers: SB_HDR }
+        );
+        const posData = await posRes.json();
+        if (!cancelled && Array.isArray(posData) && posData.length) {
+          setAlgoPosition(posData[0]);
+        } else if (!cancelled) {
+          setAlgoPosition(null);
+        }
+      } catch { /* ignore */ }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [sym]);
+
   const runAnalysis = async () => {
     setLoading(true);
     setError(null);
@@ -4558,7 +4613,21 @@ function SignalsWorkspace({ onNavigate }) {
       const price      = closes[closes.length - 1];
       const ema20val   = _ema(closes, 20);
       const ema50val   = _ema(closes, 50);
-      const autoDir    = ema20val > ema50val ? 'LONG' : 'SHORT';
+      const ema200val  = closes.length >= 200 ? _ema(closes, 200) : 0;
+      // AUTO direction: use full indicator bias, not just EMA20/50
+      // This mirrors auto-analyze's htfTrend logic so both engines start from the same bias
+      const htfBull = ema20val > ema50val && price > ema50val && (ema200val === 0 || price > ema200val);
+      const htfBear = ema20val < ema50val && price < ema50val && (ema200val === 0 || price < ema200val);
+      const rsiVal   = _rsi(closes);
+      const macdVal  = _macd(closes);
+      let autoScore  = 0;
+      if (htfBull)          autoScore += 3;
+      if (htfBear)          autoScore -= 3;
+      if (rsiVal > 55)      autoScore -= 1;
+      if (rsiVal < 45)      autoScore += 1;
+      if (macdVal.bullish)  autoScore += 2;
+      if (macdVal.bearish)  autoScore -= 2;
+      const autoDir = autoScore >= 0 ? 'LONG' : 'SHORT';
       const effectDir  = dir === 'AUTO' ? autoDir : dir;
 
       // Compute numeric SL/TP levels for display (mirrors _runAnalysis internals)
@@ -4691,6 +4760,85 @@ function SignalsWorkspace({ onNavigate }) {
               <span style={{ fontSize: 14 }}>🔶</span>
               <span style={{ color: T.amber, fontSize: 12, fontWeight: 700 }}>DEMO MODE</span>
               <span style={{ color: T.sub, fontSize: 12 }}>— TA analysis is real, price data is synthetic. Live data will resume automatically when Yahoo Finance API is reachable.</span>
+            </div>
+          )}
+
+          {/* ── Conflict / Consensus banner ── */}
+          {(() => {
+            const algoDir = algoSignal
+              ? (['LONG_NOW','WAIT_LONG'].includes(algoSignal.verdict) ? 'LONG'
+                :['SHORT_NOW','WAIT_SHORT'].includes(algoSignal.verdict) ? 'SHORT'
+                : null)
+              : null;
+            const posDir = algoPosition?.direction || null;
+            const activeAlgoDir = posDir || algoDir;
+            const taDir = result.direction;
+            const conflict = activeAlgoDir && taDir && activeAlgoDir !== taDir;
+            const confirmed = activeAlgoDir && taDir && activeAlgoDir === taDir;
+
+            if (conflict) return (
+              <div style={{ marginBottom: 14, padding: '12px 16px', borderRadius: 10,
+                background: 'rgba(239,68,68,0.09)', border: '1px solid rgba(239,68,68,0.3)',
+                display:'flex', alignItems:'flex-start', gap: 12 }}>
+                <span style={{ fontSize: 20, flexShrink: 0 }}>⚡</span>
+                <div>
+                  <div style={{ color: T.red, fontSize: 13, fontWeight: 800, marginBottom: 4 }}>
+                    ENGINE CONFLICT — TA says {taDir} · Algo has {activeAlgoDir} {posDir ? 'position OPEN' : 'signal'}
+                  </div>
+                  <div style={{ color: T.sub, fontSize: 12, lineHeight: 1.6 }}>
+                    These engines use different methods — TA reads short-term momentum (EMA/RSI/MACD),
+                    while the Algo engine reads market structure (SMC sweep+MSS on 15m+1h).
+                    When they conflict, <strong style={{ color: T.text }}>trust the Algo engine for entries</strong> —
+                    it uses the same logic as your paper trades.
+                    {posDir && <> The Algo LONG is currently open — do not manually short against it without closing it first.</>}
+                  </div>
+                </div>
+              </div>
+            );
+
+            if (confirmed) return (
+              <div style={{ marginBottom: 14, padding: '10px 16px', borderRadius: 10,
+                background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)',
+                display:'flex', alignItems:'center', gap: 12 }}>
+                <span style={{ fontSize: 18 }}>✅</span>
+                <div style={{ color: '#34D399', fontSize: 12, fontWeight: 700 }}>
+                  ENGINES ALIGNED — TA and Algo both signal {taDir}. High-conviction setup.
+                </div>
+              </div>
+            );
+
+            return null;
+          })()}
+
+          {/* ── Algo Engine reference card ── */}
+          {algoSignal && (
+            <div style={{ marginBottom: 14, padding: '12px 16px', borderRadius: 10,
+              background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: '#818CF8', letterSpacing:'.06em' }}>🤖 ALGO ENGINE (SMC/ICT)</div>
+                <div style={{ fontSize: 10, color: T.muted }}>{timeAgo(algoSignal.created_at)}</div>
+              </div>
+              <div style={{ display:'flex', gap: 14, flexWrap:'wrap', fontSize: 12 }}>
+                <span style={{ color: T.sub }}>Verdict: <strong style={{ color:
+                  ['LONG_NOW','WAIT_LONG'].includes(algoSignal.verdict) ? T.green :
+                  ['SHORT_NOW','WAIT_SHORT'].includes(algoSignal.verdict) ? T.red : T.muted
+                }}>{algoSignal.verdict}</strong></span>
+                <span style={{ color: T.sub }}>Confidence: <strong style={{ color: T.text }}>{algoSignal.confidence}%</strong></span>
+                <span style={{ color: T.sub }}>HTF: <strong style={{ color:
+                  algoSignal.htf_trend === 'bullish' ? T.green :
+                  algoSignal.htf_trend === 'bearish' ? T.red : T.muted
+                }}>{(algoSignal.htf_trend||'—').toUpperCase()}</strong></span>
+                {algoSignal.sweep_occurred && <span style={{ color:'#F59E0B', fontWeight:700 }}>⚡ Sweep</span>}
+                {algoSignal.mss_occurred   && <span style={{ color:'#34D399', fontWeight:700 }}>✓ MSS</span>}
+              </div>
+              {algoPosition && (
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(99,102,241,0.15)',
+                  fontSize: 11, color: algoPosition.direction === 'LONG' ? T.green : T.red, fontWeight: 700 }}>
+                  📋 Open {algoPosition.direction} position — Entry {Number(algoPosition.entry_price).toFixed(2)}
+                  {algoPosition.sl_price ? ` · SL ${Number(algoPosition.sl_price).toFixed(2)}` : ''}
+                  {algoPosition.tp1_price ? ` · TP1 ${Number(algoPosition.tp1_price).toFixed(2)}` : ''}
+                </div>
+              )}
             </div>
           )}
 
@@ -6303,6 +6451,7 @@ function AlgoTradingTab({ user }) {
   const [prices,    setPrices]    = useState({});
   const [killBusy,  setKillBusy]  = useState(false);
   const [cycleBusy, setCycleBusy] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [cycleResult, setCycleResult] = useState(null);
   const [posView,   setPosView]   = useState('open'); // 'open' | 'history'
   const { show: showToast } = useToast();
@@ -6332,8 +6481,8 @@ function AlgoTradingTab({ user }) {
 
   // ── Fetch live prices for open positions ─────────────────────────────────
   useEffect(() => {
-    const openSyms = [...new Set(positions.filter(p => p.status === 'OPEN').map(p => p.symbol))];
-    if (openSyms.length === 0) return;
+    const openSyms = [...new Set(positions.filter(p => ['OPEN','TP1_HIT'].includes(p.status)).map(p => p.symbol))];
+    if (openSyms.length === 0) { setPrices({}); return; }
     mdFetchPrices(openSyms).then(pm => setPrices(pm)).catch(() => {});
   }, [positions]);
 
@@ -6402,15 +6551,38 @@ function AlgoTradingTab({ user }) {
     }
   };
 
+  const syncPositions = async () => {
+    setUpdateBusy(true);
+    try {
+      const headers = await getAuthedJsonHeaders();
+      const res = await fetch(`${SB_URL}/functions/v1/update-paper-positions`, {
+        method: 'POST',
+        headers,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showToast(json.error || 'Position sync failed', 'error', 5000);
+        return;
+      }
+      showToast(`Positions synced: ${json.updated || 0} updated, ${json.closed || 0} closed`, 'success', 4500);
+      await load();
+    } catch (err) {
+      showToast(err.message || 'Sign in required to sync positions', 'error', 6000);
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
   // ── Helpers ───────────────────────────────────────────────────────────────
-  const openPos    = positions.filter(p => p.status === 'OPEN');
-  const closedPos  = positions.filter(p => p.status !== 'OPEN');
+  const openPos    = positions.filter(p => ['OPEN','TP1_HIT'].includes(p.status));
+  const closedPos  = positions.filter(p => !['OPEN','TP1_HIT'].includes(p.status));
   const totalOpenPnl = openPos.reduce((s, p) => {
     const live = prices[p.symbol];
     if (!live) return s + safeNum(p.pnl_usd, 0);
     const dir  = p.direction === 'LONG' ? 1 : -1;
-    const qty  = safeNum(p.quantity, 1);
-    return s + (live - safeNum(p.entry_price, live)) * dir * qty;
+    const contract = getInstrumentSpec(p.symbol).contractSize;
+    const lotSize = safeNum(p.lot_size, 0.01);
+    return s + (live - safeNum(p.entry_price, live)) * dir * lotSize * contract;
   }, 0);
 
   const rCurve = closedPos
@@ -6557,6 +6729,12 @@ function AlgoTradingTab({ user }) {
               style={{ padding:'10px 16px', borderRadius:9, border:'none', background:`linear-gradient(135deg,${T.indigo},${T.blue})`, color:'#fff', fontWeight:900, cursor:cycleBusy||ks?'not-allowed':'pointer' }}>
               {cycleBusy ? 'Running…' : 'Force Demo Test'}
             </button>
+            <button
+              onClick={syncPositions}
+              disabled={updateBusy}
+              style={{ padding:'10px 16px', borderRadius:9, border:`1px solid rgba(16,185,129,0.35)`, background:'rgba(16,185,129,0.08)', color:T.green, fontWeight:900, cursor:updateBusy?'wait':'pointer' }}>
+              {updateBusy ? 'Syncing…' : 'Sync Positions'}
+            </button>
           </div>
         </div>
         {cycleResult && (
@@ -6600,7 +6778,10 @@ function AlgoTradingTab({ user }) {
               </button>
             ))}
           </div>
-          <button onClick={load} style={{ padding:'6px 14px', background:'transparent', border:`1px solid ${T.border}`, borderRadius:8, color:T.muted, fontSize:12, cursor:'pointer' }}>⟳ Refresh</button>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={syncPositions} disabled={updateBusy} style={{ padding:'6px 14px', background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.25)', borderRadius:8, color:T.green, fontSize:12, fontWeight:800, cursor:updateBusy?'wait':'pointer' }}>{updateBusy ? 'Syncing…' : '↻ Sync'}</button>
+            <button onClick={load} style={{ padding:'6px 14px', background:'transparent', border:`1px solid ${T.border}`, borderRadius:8, color:T.muted, fontSize:12, cursor:'pointer' }}>⟳ Refresh</button>
+          </div>
         </div>
 
         {posView === 'open' && (
@@ -6615,8 +6796,9 @@ function AlgoTradingTab({ user }) {
               {openPos.map(pos => {
                 const live = prices[pos.symbol];
                 const dir  = pos.direction === 'LONG' ? 1 : -1;
-                const qty  = safeNum(pos.quantity, 1);
-                const unrPnl = live ? (live - safeNum(pos.entry_price, live)) * dir * qty : safeNum(pos.pnl_usd, 0);
+                const contract = getInstrumentSpec(pos.symbol).contractSize;
+                const lotSize = safeNum(pos.lot_size, 0.01);
+                const unrPnl = live ? (live - safeNum(pos.entry_price, live)) * dir * lotSize * contract : safeNum(pos.pnl_usd, 0);
                 return (
                   <div key={pos.id} className="pp-panel" style={{ padding:'14px 18px', border:`1px solid ${unrPnl>=0?'rgba(16,185,129,0.2)':'rgba(239,68,68,0.2)'}` }}>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:10 }}>
@@ -6624,7 +6806,10 @@ function AlgoTradingTab({ user }) {
                         <div style={{ width:10, height:10, borderRadius:5, background: pos.direction==='LONG'?T.green:T.red, boxShadow:`0 0 8px ${pos.direction==='LONG'?T.green:T.red}` }}/>
                         <div>
                           <div style={{ fontWeight:900, fontSize:16 }}>{pos.symbol}</div>
-                          <div style={{ color: pos.direction==='LONG'?T.green:T.red, fontSize:11, fontWeight:800 }}>{pos.direction}</div>
+                          <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:2 }}>
+                            <span style={{ color: pos.direction==='LONG'?T.green:T.red, fontSize:11, fontWeight:800 }}>{pos.direction}</span>
+                            {pos.status === 'TP1_HIT' && <Badge label="TP1 HIT" color={T.green}/>}
+                          </div>
                         </div>
                         <div style={{ display:'flex', gap:16, marginLeft:8 }}>
                           {[
