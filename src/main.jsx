@@ -6588,10 +6588,10 @@ function AlgoTradingTab({ user }) {
   const rCurve = closedPos
     .sort((a,b) => new Date(a.closed_at||a.created_at) - new Date(b.closed_at||b.created_at))
     .reduce((acc, p) => {
-      const prev = acc[acc.length - 1]?.v || 0;
+      const prev = acc[acc.length - 1]?.value || 0;
       acc.push({
-        t: new Date(p.closed_at||p.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short' }),
-        v: prev + safeNum(p.pnl_r, 0),
+        label: new Date(p.closed_at||p.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short' }),
+        value: prev + safeNum(p.pnl_r, 0),
       });
       return acc;
     }, []);
@@ -6760,7 +6760,7 @@ function AlgoTradingTab({ user }) {
         <div className="pp-panel" style={{ padding:20 }}>
           <div style={{ fontWeight:800, fontSize:16, marginBottom:4 }}>Live R Equity Curve</div>
           <div style={{ color:T.sub, fontSize:12, marginBottom:14 }}>Накопленный P&L в R-единицах · {closedPos.length} закрытых позиций</div>
-          <MiniLineChart points={rCurve} color={rCurve[rCurve.length-1]?.v >= 0 ? T.green : T.red} label="Closed positions will build the curve"/>
+          <MiniLineChart points={rCurve} color={rCurve[rCurve.length-1]?.value >= 0 ? T.green : T.red} label="Closed positions will build the curve"/>
         </div>
       )}
 
