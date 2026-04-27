@@ -63,8 +63,56 @@ const CORRELATION_GROUP: Record<string, string> = {
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Headers': 'Authorization,Content-Type,apikey',
+  'Access-Control-Allow-Headers': 'Authorization,Content-Type,apikey,x-proppilot-cron-secret',
 };
+
+// ── Currency mapping for news checks ────────────────────────────────────────
+const SYMBOL_CURRENCIES: Record<string, string[]> = {
+  'XAU/USD': ['USD', 'XAU'],
+  'EUR/USD': ['EUR', 'USD'],
+  'GBP/USD': ['GBP', 'USD'],
+  'USD/JPY': ['USD', 'JPY'],
+  'NAS100':  ['USD'],
+  'BTC/USD': [],  // crypto ignores forex news
+  'ETH/USD': [],
+};
+
+// ── News check: reject trades within 15 min of high-impact events ────────────
+async function checkNewsBlock(symbol: string): Promise<{ blocked: boolean; reason: string }> {
+  try {
+    const currencies = SYMBOL_CURRENCIES[symbol] || [];
+    if (!currencies.length) return { blocked: false, reason: '' };
+
+    const calendarUrl = `${SB_URL}/functions/v1/calendar?window=20&impact=High`;
+    const res = await fetch(calendarUrl, {
+      headers: { 'x-proppilot-cron-secret': Deno.env.get('PROPILOT_CRON_SECRET') || '' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return { blocked: false, reason: '' };
+
+    const data = await res.json();
+    const events = (data.events || []) as Array<{
+      currency: string; impact: string; title: string; minutes_until: number | null; is_imminent: boolean;
+    }>;
+
+    const relevant = events.filter(e =>
+      currencies.includes(e.currency.toUpperCase()) &&
+      e.impact === 'High' &&
+      e.is_imminent
+    );
+
+    if (relevant.length > 0) {
+      const e = relevant[0];
+      return {
+        blocked: true,
+        reason: `News block: ${e.title} (${e.currency}) in ${Math.max(0, e.minutes_until ?? 0)}min`,
+      };
+    }
+    return { blocked: false, reason: '' };
+  } catch {
+    return { blocked: false, reason: '' }; // Don't block on calendar fetch failure
+  }
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -89,12 +137,34 @@ async function reject(
   );
 }
 
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...CORS, 'Content-Type': 'application/json' },
+  });
+}
+
+async function authorizeAction(req: Request): Promise<Response | null> {
+  const cronSecret = Deno.env.get('PROPILOT_CRON_SECRET') || Deno.env.get('APP_CRON_SECRET') || '';
+  if (cronSecret && req.headers.get('x-proppilot-cron-secret') === cronSecret) return null;
+
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return json({ error: 'Unauthorized' }, 401);
+  if (token === SB_SKEY) return null;
+
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data.user) return json({ error: 'Unauthorized' }, 401);
+  return null;
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS });
   }
+  const authError = await authorizeAction(req);
+  if (authError) return authError;
 
   const startMs = Date.now();
   let body: Record<string, unknown>;
@@ -159,6 +229,12 @@ Deno.serve(async (req) => {
   if (account.kill_switch_active) {
     return reject(symbol, direction, 'REJECT_KILL_SWITCH',
       `Kill-switch active: ${account.kill_switch_reason || 'daily loss limit'}`, 403);
+  }
+
+  // ── 3b. News block — high-impact event imminent? ─────────────────────────
+  const newsCheck = await checkNewsBlock(symbol);
+  if (newsCheck.blocked) {
+    return reject(symbol, direction, 'REJECT_NEWS_BLOCK', newsCheck.reason, 403);
   }
 
   // ── 4. Daily reset check ──────────────────────────────────────────────────

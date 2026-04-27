@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // PropPilot AI — auto-analyze Edge Function
-// Fetches OHLCV from Twelve Data, runs SMC/ICT analysis, saves to smc_signals,
+// Fetches OHLCV from Yahoo Finance, runs SMC/ICT analysis, saves to smc_signals,
 // generates AI narrative via Groq, persists to bot_memory.
 // Triggered by pg_cron 5×/day (session opens) or manually via GET/POST.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -9,7 +9,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.2';
 
 const SB_URL     = Deno.env.get('SUPABASE_URL')!;
 const SB_SKEY    = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const TD_KEY     = Deno.env.get('TWELVE_DATA_KEY') || '';
 const GROQ_KEY   = Deno.env.get('GROQ_API_KEY')   || '';
 
 const sb = createClient(SB_URL, SB_SKEY, { auth: { persistSession: false } });
@@ -22,20 +21,81 @@ const CORS = {
 
 // ── Symbols to analyze ───────────────────────────────────────────────────────
 const SYMBOLS = [
-  { symbol: 'XAU/USD', td: 'XAU/USD', type: 'commodity', pip: 0.01  },
-  { symbol: 'EUR/USD', td: 'EUR/USD', type: 'forex',     pip: 0.0001 },
-  { symbol: 'GBP/USD', td: 'GBP/USD', type: 'forex',     pip: 0.0001 },
-  { symbol: 'USD/JPY', td: 'USD/JPY', type: 'forex',     pip: 0.01  },
-  { symbol: 'NAS100',  td: 'QQQ',     type: 'index',     pip: 1.0   },
-  { symbol: 'BTC/USD', td: 'BTC/USD', type: 'crypto',    pip: 1.0   },
+  { symbol: 'XAU/USD', yf: 'GC=F',     type: 'commodity', pip: 0.01,   currencies: ['USD', 'XAU'] },
+  { symbol: 'EUR/USD', yf: 'EURUSD=X', type: 'forex',     pip: 0.0001, currencies: ['EUR', 'USD'] },
+  { symbol: 'GBP/USD', yf: 'GBPUSD=X', type: 'forex',     pip: 0.0001, currencies: ['GBP', 'USD'] },
+  { symbol: 'USD/JPY', yf: 'USDJPY=X', type: 'forex',     pip: 0.01,   currencies: ['USD', 'JPY'] },
+  { symbol: 'NAS100',  yf: '^NDX',     type: 'index',     pip: 1.0,    currencies: ['USD'] },
+  { symbol: 'BTC/USD', yf: 'BTC-USD',  type: 'crypto',    pip: 1.0,    currencies: [] }, // crypto ignores forex news
 ];
+
+// ── News: fetch upcoming events from calendar function ───────────────────────
+interface NewsEvent {
+  currency:     string;
+  impact:       string;
+  minutes_until: number | null;
+  title:        string;
+  is_imminent:  boolean;
+  is_upcoming:  boolean;
+}
+
+async function fetchUpcomingNews(windowMin = 60): Promise<NewsEvent[]> {
+  try {
+    const url = `${SB_URL}/functions/v1/calendar?window=${windowMin}`;
+    const res = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-proppilot-cron-secret': Deno.env.get('PROPILOT_CRON_SECRET') || '',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.events || []) as NewsEvent[];
+  } catch {
+    return [];
+  }
+}
+
+function getNewsRiskForSymbol(
+  symbol: string,
+  currencies: string[],
+  newsEvents: NewsEvent[]
+): { hasHighNews: boolean; hasMedNews: boolean; isImminent: boolean; minutesUntil: number | null; newsTitle: string } {
+  if (!currencies.length) return { hasHighNews: false, hasMedNews: false, isImminent: false, minutesUntil: null, newsTitle: '' };
+
+  const relevant = newsEvents.filter(e =>
+    currencies.includes(e.currency.toUpperCase())
+  );
+
+  const highEvents  = relevant.filter(e => e.impact === 'High');
+  const medEvents   = relevant.filter(e => e.impact === 'Medium');
+  const imminentHigh = highEvents.filter(e => e.is_imminent);
+  const upcomingHigh = highEvents.filter(e => e.is_upcoming);
+
+  const hasHighNews = highEvents.length > 0;
+  const hasMedNews  = medEvents.length > 0;
+  const isImminent  = imminentHigh.length > 0;
+
+  const nearest = [...highEvents, ...medEvents].sort((a, b) =>
+    (a.minutes_until ?? 9999) - (b.minutes_until ?? 9999)
+  )[0];
+
+  return {
+    hasHighNews,
+    hasMedNews,
+    isImminent,
+    minutesUntil: nearest?.minutes_until ?? null,
+    newsTitle: nearest?.title || '',
+  };
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume?: number };
 
 interface SignalResult {
   symbol:         string;
-  verdict:        'LONG_NOW' | 'SHORT_NOW' | 'WAIT_LONG' | 'WAIT_SHORT' | 'NO_TRADE';
+  verdict:        'LONG_NOW' | 'SHORT_NOW' | 'WAIT_LONG' | 'WAIT_SHORT' | 'NO_TRADE' | 'AVOID_NEWS';
   confidence:     number;
   direction:      'LONG' | 'SHORT' | null;
   entry_price:    number | null;
@@ -54,6 +114,10 @@ interface SignalResult {
   ai_narrative:   string;
   invalidation:   string;
   data_status:    'live' | 'demo' | 'error';
+  has_high_news:  boolean;
+  has_med_news:   boolean;
+  news_minutes:   number | null;
+  news_title:     string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -61,6 +125,19 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status, headers: { ...CORS, 'Content-Type': 'application/json' },
   });
+}
+
+async function authorizeAction(req: Request): Promise<Response | null> {
+  const cronSecret = Deno.env.get('PROPILOT_CRON_SECRET') || Deno.env.get('APP_CRON_SECRET') || '';
+  if (cronSecret && req.headers.get('x-proppilot-cron-secret') === cronSecret) return null;
+
+  const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+  if (!token) return json({ error: 'Unauthorized' }, 401);
+  if (token === SB_SKEY) return null;
+
+  const { data, error } = await sb.auth.getUser(token);
+  if (error || !data.user) return json({ error: 'Unauthorized' }, 401);
+  return null;
 }
 
 function detectSession(): string {
@@ -73,35 +150,49 @@ function detectSession(): string {
   return 'Dead';
 }
 
-// ── Fetch OHLCV from Twelve Data ─────────────────────────────────────────────
-async function fetchCandles(tdSymbol: string, interval = '15min', outputsize = 200): Promise<Candle[]> {
-  if (!TD_KEY) throw new Error('TWELVE_DATA_KEY not set');
+const YF_INTERVAL: Record<string, { interval: string; range: string }> = {
+  '15min': { interval: '15m', range: '5d' },
+  '1h':    { interval: '1h',  range: '30d' },
+};
 
-  const url = new URL('https://api.twelvedata.com/time_series');
-  url.searchParams.set('symbol', tdSymbol);
-  url.searchParams.set('interval', interval);
-  url.searchParams.set('outputsize', String(outputsize));
-  url.searchParams.set('apikey', TD_KEY);
-  url.searchParams.set('format', 'JSON');
+// ── Fetch OHLCV from Yahoo Finance ──────────────────────────────────────────
+async function fetchCandles(yfSymbol: string, interval = '15min', outputsize = 200): Promise<Candle[]> {
+  const iv = YF_INTERVAL[interval] || YF_INTERVAL['15min'];
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSymbol)}?interval=${iv.interval}&range=${iv.range}&includePrePost=false`;
 
-  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10_000) });
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`Yahoo Finance HTTP ${res.status}`);
+
   const data = await res.json();
+  const result = data?.chart?.result?.[0];
+  if (!result) throw new Error(`No candles for ${yfSymbol}`);
 
-  if (data.status === 'error' || !Array.isArray(data.values)) {
-    throw new Error(data.message || `No candles for ${tdSymbol}`);
-  }
+  const timestamps: number[] = result.timestamp || [];
+  const quote = result.indicators?.quote?.[0] || {};
+  const opens: number[] = quote.open || [];
+  const highs: number[] = quote.high || [];
+  const lows: number[] = quote.low || [];
+  const closes: number[] = quote.close || [];
+  const volumes: number[] = quote.volume || [];
 
-  return (data.values as Record<string, string>[])
-    .map(v => ({
-      time:   Date.parse(v.datetime + (v.datetime.includes('T') ? '' : 'Z')),
-      open:   parseFloat(v.open),
-      high:   parseFloat(v.high),
-      low:    parseFloat(v.low),
-      close:  parseFloat(v.close),
-      volume: v.volume ? parseFloat(v.volume) : undefined,
+  const candles = timestamps
+    .map((ts, i) => ({
+      time: ts * 1000,
+      open: Number(opens[i]),
+      high: Number(highs[i]),
+      low: Number(lows[i]),
+      close: Number(closes[i]),
+      volume: volumes[i] != null ? Number(volumes[i]) : undefined,
     }))
-    .filter(c => isFinite(c.time) && isFinite(c.open))
+    .filter(c => Number.isFinite(c.time) && Number.isFinite(c.open) && Number.isFinite(c.high) && Number.isFinite(c.low) && Number.isFinite(c.close))
+    .slice(-outputsize)
     .sort((a, b) => a.time - b.time);
+
+  if (candles.length < 20) throw new Error(`Insufficient candles for ${yfSymbol}`);
+  return candles;
 }
 
 // ── ATR calculation ──────────────────────────────────────────────────────────
@@ -451,38 +542,165 @@ Be specific, max 150 words.`;
   }
 }
 
+function paperPayloadFromSignal(sig: SignalResult, session: string, demoTest: boolean): Record<string, unknown> | null {
+  if (!sig.direction) return null;
+
+  const price = Number((sig.signal_json as { price?: unknown })?.price);
+  const atr = Number(sig.atr || (sig.signal_json as { atr?: unknown })?.atr);
+  let entry = sig.entry_price;
+  let sl = sig.sl_price;
+  let tp1 = sig.tp1_price;
+  let tp2 = sig.tp2_price;
+
+  if ((!entry || !sl || !tp1 || !tp2) && demoTest && Number.isFinite(price) && Number.isFinite(atr) && atr > 0) {
+    entry = price;
+    const risk = atr * 1.4;
+    if (sig.direction === 'LONG') {
+      sl = price - risk;
+      tp1 = price + risk * 2.2;
+      tp2 = price + risk * 3.6;
+    } else {
+      sl = price + risk;
+      tp1 = price - risk * 2.2;
+      tp2 = price - risk * 3.6;
+    }
+  }
+
+  if (!entry || !sl || !tp1 || !tp2) return null;
+
+  return {
+    symbol: sig.symbol,
+    direction: sig.direction,
+    entry_price: Number(entry),
+    sl_price: Number(sl),
+    tp1_price: Number(tp1),
+    tp2_price: Number(tp2),
+    confidence: demoTest ? Math.max(sig.confidence, 70) : sig.confidence,
+    session_type: session,
+    atr: sig.atr,
+    notes: demoTest
+      ? `DEMO_TEST paper trade from ${sig.verdict}. Real market data, synthetic paper fill.`
+      : `AUTO_PAPER_TRADE from ${sig.verdict}`,
+  };
+}
+
+async function openPaperTradeFromSignal(sig: SignalResult, session: string, demoTest: boolean): Promise<Record<string, unknown>> {
+  const payload = paperPayloadFromSignal(sig, session, demoTest);
+  if (!payload) {
+    return { success: false, symbol: sig.symbol, error: 'Signal has no executable trade levels' };
+  }
+
+  try {
+    const res = await fetch(`${SB_URL}/functions/v1/execute-paper-trade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SB_SKEY}` },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json().catch(() => ({}));
+    return { ...json, success: res.ok && json.success !== false, httpStatus: res.status, symbol: sig.symbol };
+  } catch (err) {
+    return { success: false, symbol: sig.symbol, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  const authError = await authorizeAction(req);
+  if (authError) return authError;
 
   const started = Date.now();
   const session = detectSession();
   const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
   const symbolFilter: string | null = body.symbol || new URL(req.url).searchParams.get('symbol') || null;
   const dryRun = body.dryRun === true || new URL(req.url).searchParams.get('dryRun') === 'true';
+  const autoTrade = body.autoTrade === true || new URL(req.url).searchParams.get('autoTrade') === 'true';
+  const demoTest = body.demoTest === true || new URL(req.url).searchParams.get('demoTest') === 'true';
 
   const toAnalyze = symbolFilter
-    ? SYMBOLS.filter(s => s.symbol === symbolFilter || s.td === symbolFilter)
+    ? SYMBOLS.filter(s => s.symbol === symbolFilter || s.yf === symbolFilter)
     : SYMBOLS;
 
   const results: SignalResult[] = [];
   const errors: { symbol: string; error: string }[] = [];
 
-  // Rate limit: Twelve Data free = 8 req/min — process sequentially with small delay
+  // ── Fetch upcoming news events once for all symbols ──────────────────────
+  const newsEvents = await fetchUpcomingNews(60);
+  console.log(`[auto-analyze] fetched ${newsEvents.length} upcoming news events`);
+
   for (const sym of toAnalyze) {
     try {
+      // ── Check news risk BEFORE fetching candles ─────────────────────────
+      const newsRisk = getNewsRiskForSymbol(sym.symbol, sym.currencies, newsEvents);
+
+      // HIGH impact news imminent (< 15 min) → AVOID_NEWS immediately
+      if (newsRisk.isImminent && newsRisk.hasHighNews) {
+        console.log(`[auto-analyze] ${sym.symbol}: AVOID_NEWS — ${newsRisk.newsTitle} in ${newsRisk.minutesUntil}min`);
+        results.push({
+          symbol:          sym.symbol,
+          verdict:         'AVOID_NEWS',
+          confidence:      0,
+          direction:       null,
+          entry_price:     null,
+          sl_price:        null,
+          tp1_price:       null,
+          tp2_price:       null,
+          risk_reward:     null,
+          atr:             null,
+          session_name:    session,
+          htf_trend:       'NEUTRAL',
+          sweep_occurred:  false,
+          mss_occurred:    false,
+          displacement:    false,
+          reasoning_codes: ['AVOID_NEWS', 'HIGH_IMPACT_IMMINENT'],
+          signal_json:     { news_title: newsRisk.newsTitle, minutes: newsRisk.minutesUntil },
+          ai_narrative:    `⚠️ High-impact news imminent: ${newsRisk.newsTitle}. Avoid trading ${sym.symbol} for the next 30 minutes.`,
+          invalidation:    `News event: ${newsRisk.newsTitle}`,
+          data_status:     'live',
+          has_high_news:   true,
+          has_med_news:    false,
+          news_minutes:    newsRisk.minutesUntil,
+          news_title:      newsRisk.newsTitle,
+        });
+        continue;
+      }
+
       const [candles15m, candles1h] = await Promise.all([
-        fetchCandles(sym.td, '15min', 200),
-        fetchCandles(sym.td, '1h', 100),
+        fetchCandles(sym.yf, '15min', 200),
+        fetchCandles(sym.yf, '1h', 100),
       ]);
 
-      const sig = analyzeSMC(sym.symbol, candles15m, candles1h, sym.pip, session);
+      let sig = analyzeSMC(sym.symbol, candles15m, candles1h, sym.pip, session);
+
+      // ── Apply news penalty to confidence ────────────────────────────────
+      if (newsRisk.hasHighNews) {
+        sig = {
+          ...sig,
+          confidence: Math.max(0, sig.confidence - 25),
+          reasoning_codes: [...sig.reasoning_codes, 'NEWS_RISK_HIGH'],
+        };
+        // Downgrade LONG_NOW/SHORT_NOW to WAIT if confidence drops below threshold
+        if (sig.confidence < 60 && (sig.verdict === 'LONG_NOW' || sig.verdict === 'SHORT_NOW')) {
+          sig = { ...sig, verdict: 'WAIT_LONG' in sig.verdict ? 'WAIT_LONG' : 'WAIT_SHORT' };
+        }
+      } else if (newsRisk.hasMedNews) {
+        sig = {
+          ...sig,
+          confidence: Math.max(0, sig.confidence - 10),
+          reasoning_codes: [...sig.reasoning_codes, 'NEWS_RISK_MED'],
+        };
+      }
+
       const narrative = await generateNarrative(sig, results.map(r => ({ ...r })));
 
-      results.push({ ...sig, ai_narrative: narrative });
-
-      // Small delay to respect rate limits on free tier
-      if (toAnalyze.length > 1) await new Promise(r => setTimeout(r, 800));
+      results.push({
+        ...sig,
+        ai_narrative:  narrative,
+        has_high_news: newsRisk.hasHighNews,
+        has_med_news:  newsRisk.hasMedNews,
+        news_minutes:  newsRisk.minutesUntil,
+        news_title:    newsRisk.newsTitle,
+      });
 
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -505,9 +723,16 @@ Deno.serve(async (req) => {
         ai_narrative: '',
         invalidation: 'Data unavailable',
         data_status: 'error',
+        has_high_news: false,
+        has_med_news:  false,
+        news_minutes:  null,
+        news_title:    '',
       });
     }
   }
+
+  const actionableSignals = results.filter(r => r.verdict === 'LONG_NOW' || r.verdict === 'SHORT_NOW');
+  const tradeResults: Record<string, unknown>[] = [];
 
   // ── Persist to smc_signals ────────────────────────────────────────────────
   if (!dryRun && results.length > 0) {
@@ -516,7 +741,7 @@ Deno.serve(async (req) => {
       timeframe:       'm15',
       verdict:         sig.verdict,
       confidence:      sig.confidence,
-      direction:       sig.direction,
+      // direction is not a column in smc_signals — derived from verdict
       entry_price:     sig.entry_price,
       sl_price:        sig.sl_price,
       tp1_price:       sig.tp1_price,
@@ -524,7 +749,7 @@ Deno.serve(async (req) => {
       risk_reward:     sig.risk_reward,
       atr:             sig.atr,
       session_name:    sig.session_name,
-      htf_trend:       sig.htf_trend,
+      htf_trend:       sig.htf_trend?.toLowerCase().replace('neutral','ranging') as 'bullish'|'bearish'|'ranging'|null,
       sweep_occurred:  sig.sweep_occurred,
       mss_occurred:    sig.mss_occurred,
       displacement:    sig.displacement,
@@ -543,7 +768,6 @@ Deno.serve(async (req) => {
 
     // ── Persist session summary to bot_memory ─────────────────────────────
     const summary = await generateSessionSummary(results.map(r => ({ ...r })));
-    const actionableSignals = results.filter(r => r.verdict === 'LONG_NOW' || r.verdict === 'SHORT_NOW');
 
     await sb.from('bot_memory').insert({
       session_type:      session,
@@ -562,10 +786,25 @@ Deno.serve(async (req) => {
     });
   }
 
+  if (!dryRun && autoTrade) {
+    let tradeCandidates = actionableSignals.filter(sig => paperPayloadFromSignal(sig, session, false));
+
+    if (tradeCandidates.length === 0 && demoTest) {
+      tradeCandidates = results
+        .filter(sig => sig.direction && sig.confidence >= 50)
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, 1);
+    }
+
+    for (const sig of tradeCandidates.slice(0, 1)) {
+      tradeResults.push(await openPaperTradeFromSignal(sig, session, demoTest && actionableSignals.length === 0));
+    }
+  }
+
   // ── Telegram push for actionable signals (fire-and-forget) ───────────────
   if (!dryRun && actionableSignals.length > 0) {
     const tgUrl = `${SB_URL}/functions/v1/telegram-bot`;
-    const tgKey = SB_KEY;
+    const tgKey = SB_SKEY;
     Promise.all(
       actionableSignals.slice(0, 3).map(sig =>
         fetch(tgUrl, {
@@ -597,6 +836,10 @@ Deno.serve(async (req) => {
     session,
     analyzed:   results.length,
     actionable: results.filter(r => r.verdict === 'LONG_NOW' || r.verdict === 'SHORT_NOW').length,
+    autoTrade,
+    demoTest,
+    tradesOpened: tradeResults.filter(r => r.success).length,
+    tradeResults,
     durationMs: Date.now() - started,
     errors:     errors.length,
     signals:    results.map(r => ({
