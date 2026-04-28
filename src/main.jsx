@@ -204,6 +204,8 @@ const SB_URL = import.meta.env.VITE_SUPABASE_URL || 'https://nxiednydxyrtxpkmgto
 const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
 const SB_HDR = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` };
 const SB_JSON_HDR = { ...SB_HDR, 'Content-Type': 'application/json' };
+const FN_URL = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL || `${SB_URL}/functions/v1`;
+const PERSONAL_MODE = import.meta.env.VITE_PERSONAL_MODE !== 'false';
 
 // ── Supabase: user_challenges sync ────────────────────────────────────────
 async function syncChallengeToSB(userId, challengeData) {
@@ -288,8 +290,160 @@ async function getAuthedJsonHeaders() {
   };
 }
 
+async function getOptionalJsonHeaders() {
+  const token = await getSupabaseAccessToken().catch(() => null);
+  return {
+    ...SB_JSON_HDR,
+    Authorization: `Bearer ${token || SB_KEY}`,
+  };
+}
+
+function tradeDateToIso(label) {
+  if (!label) return new Date().toISOString();
+  const d = new Date(`${label} ${new Date().getFullYear()} 12:00:00`);
+  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
+function isoToTradeDate(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(d.getTime())) return new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+  return d.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+}
+
+function rrToR(rr, pnl) {
+  const raw = String(rr || '').trim();
+  if (!raw || raw === '—') return pnl > 0 ? 1 : pnl < 0 ? -1 : 0;
+  const rMatch = raw.match(/(-?\d+(?:\.\d+)?)\s*r/i);
+  if (rMatch) return Number(rMatch[1]);
+  const ratio = raw.match(/1\s*:\s*(\d+(?:\.\d+)?)/);
+  if (ratio) return pnl > 0 ? Number(ratio[1]) : pnl < 0 ? -1 : 0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : (pnl > 0 ? 1 : pnl < 0 ? -1 : 0);
+}
+
+function rToLabel(v) {
+  const n = safeNum(v, null);
+  if (n == null) return '—';
+  return `${n > 0 ? '+' : ''}${n.toFixed(2)}R`;
+}
+
+function localTradeToJournalPayload(trade) {
+  const pnl = safeNum(trade.pnl, 0) || 0;
+  const pnlR = rrToR(trade.rr, pnl);
+  const score = Math.max(0, Math.min(100, safeNum(trade.score, 75) || 75));
+  const issue = String(trade.issue || '').trim();
+  return {
+    symbol: trade.sym || trade.symbol || 'XAUUSD',
+    direction: trade.dir || trade.direction || 'LONG',
+    session: trade.session || 'Manual',
+    timeframe: trade.timeframe || null,
+    entry_time: trade.entry_time || tradeDateToIso(trade.date),
+    exit_time: trade.exit_time || tradeDateToIso(trade.date),
+    pnl_usd: pnl,
+    pnl_r: pnlR,
+    outcome: pnl > 0 ? 'win' : pnl < 0 ? 'loss' : 'breakeven',
+    strategy: trade.strategy || 'Manual',
+    source: trade.source || 'manual',
+    entry_quality: score,
+    risk_quality: score,
+    overall_rating: Math.max(1, Math.min(5, Math.round(score / 20))),
+    lessons_learned: issue || null,
+    mistakes: issue ? [issue] : null,
+    followed_plan: trade.followed_plan ?? null,
+    impulsive: Boolean(trade.impulsive),
+  };
+}
+
+function journalRowToLocalTrade(row) {
+  const pnl = safeNum(row.pnl_usd, 0) || 0;
+  const score = safeNum(row.ai_overall_score, null)
+    ?? safeNum(row.entry_quality, null)
+    ?? safeNum(row.risk_quality, null)
+    ?? 75;
+  return {
+    id: row.id,
+    dbId: row.id,
+    date: isoToTradeDate(row.exit_time || row.entry_time || row.created_at),
+    sym: row.symbol,
+    dir: row.direction,
+    pnl,
+    rr: rToLabel(row.pnl_r),
+    score,
+    win: ['win', 'partial_win'].includes(row.outcome) || pnl > 0,
+    issue: row.lessons_learned || row.ai_key_lesson || row.what_happened || row.entry_reason || null,
+    session: row.session,
+    strategy: row.strategy,
+    source: row.source,
+    ai: row.ai_analyzed ? {
+      verdict: row.ai_verdict,
+      lesson: row.ai_key_lesson,
+      pattern: row.ai_pattern,
+    } : null,
+  };
+}
+
+async function fetchJournalTradesFromServer(limit = 300) {
+  const headers = await getOptionalJsonHeaders();
+  const res = await fetch(`${FN_URL}/journal?action=list&limit=${limit}`, { headers });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Journal load failed (${res.status})`);
+  return Array.isArray(json.trades) ? json.trades.map(journalRowToLocalTrade) : [];
+}
+
+async function createJournalTradeOnServer(trade) {
+  const headers = await getOptionalJsonHeaders();
+  const res = await fetch(`${FN_URL}/journal`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'create', trade: localTradeToJournalPayload(trade) }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Journal save failed (${res.status})`);
+  return json.trade ? journalRowToLocalTrade(json.trade) : trade;
+}
+
+async function deleteJournalTradeOnServer(id) {
+  const headers = await getOptionalJsonHeaders();
+  const res = await fetch(`${FN_URL}/journal`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ action: 'delete', id }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Journal delete failed (${res.status})`);
+  return json;
+}
+
+async function fetchBacktestRunsFromServer() {
+  const headers = await getOptionalJsonHeaders();
+  const res = await fetch(`${FN_URL}/backtest?action=list&limit=30`, { headers });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Backtest list failed (${res.status})`);
+  return Array.isArray(json.runs) ? json.runs : [];
+}
+
+async function fetchBacktestRunFromServer(id) {
+  const headers = await getOptionalJsonHeaders();
+  const res = await fetch(`${FN_URL}/backtest?action=run&id=${encodeURIComponent(id)}`, { headers });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Backtest load failed (${res.status})`);
+  return json;
+}
+
+async function runBacktestOnServer(config) {
+  const headers = await getOptionalJsonHeaders();
+  const res = await fetch(`${FN_URL}/backtest`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(config),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || `Backtest run failed (${res.status})`);
+  return json;
+}
+
 // Market data — Supabase Edge Function proxying Yahoo Finance (free, no app key)
-const MD_URL = `${import.meta.env.VITE_SUPABASE_FUNCTIONS_URL || `${SB_URL}/functions/v1`}/market-data`;
+const MD_URL = `${FN_URL}/market-data`;
 // Helper: fetch OHLCV via market-data Edge Function (Yahoo Finance)
 async function mdFetchOHLCV(sym, interval = '1h', bars = 200) {
   const enc = encodeURIComponent(sym);
@@ -2837,6 +2991,44 @@ function Journal({ trades, setTrades, plan }) {
   const [sel,      setSel]      = useState(trades[1] || trades[0]);
   const [showLog,  setShowLog]  = useState(false);
   const [pending,  setPending]  = useState(() => LS.get('pendingPlan', null));
+  const [journalSync, setJournalSync] = useState({ state:'loading', message:'Loading journal from Supabase…' });
+  const initialLocalTrades = useRef(trades);
+  const migratedLocalRef = useRef(false);
+  const { show: showToast } = useToast();
+
+  const loadJournal = useCallback(async () => {
+    setJournalSync({ state:'loading', message:'Loading journal from Supabase…' });
+    try {
+      let remoteTrades = await fetchJournalTradesFromServer();
+
+      if (remoteTrades.length === 0 && initialLocalTrades.current.length > 0 && !migratedLocalRef.current) {
+        migratedLocalRef.current = true;
+        const migrated = [];
+        for (const trade of [...initialLocalTrades.current].reverse()) {
+          migrated.push(await createJournalTradeOnServer(trade));
+        }
+        remoteTrades = migrated.reverse();
+        showToast(`Migrated ${remoteTrades.length} local journal trades to Supabase`, 'success', 5000);
+      }
+
+      setTrades(remoteTrades);
+      setSel(prev => remoteTrades.find(t => t.id === prev?.id) || remoteTrades[0] || null);
+      setJournalSync({
+        state:'synced',
+        message: `${remoteTrades.length} trades synced from journal_trades`,
+      });
+    } catch (err) {
+      console.warn('[journal] Supabase sync failed:', err);
+      setJournalSync({
+        state:'local',
+        message: 'Supabase journal unavailable. Using local browser journal until it is deployed.',
+      });
+    }
+  }, [setTrades, showToast]);
+
+  useEffect(() => {
+    loadJournal();
+  }, [loadJournal]);
 
   const hmColor = pnl => pnl > 200 ? '#34D39988' : pnl > 0 ? '#34D39944' : pnl < -200 ? '#F8717188' : pnl < 0 ? '#F8717144' : 'rgba(255,255,255,0.06)';
 
@@ -2860,16 +3052,40 @@ function Journal({ trades, setTrades, plan }) {
     }
   }
 
-  const handleSaveTrade = (trade) => {
-    const updated = [trade, ...trades];
-    setTrades(updated);
-    setSel(trade);
+  const handleSaveTrade = async (trade) => {
+    const optimistic = { ...trade, id: `local_${Date.now()}` };
+    const optimisticTrades = [optimistic, ...trades];
+    setTrades(optimisticTrades);
+    setSel(optimistic);
+    setJournalSync({ state:'saving', message:'Saving trade to journal_trades…' });
+    try {
+      const saved = await createJournalTradeOnServer(trade);
+      const updated = [saved, ...trades];
+      setTrades(updated);
+      setSel(saved);
+      setJournalSync({ state:'synced', message:'Trade saved to Supabase journal_trades' });
+      showToast('Trade saved to Supabase journal', 'success');
+    } catch (err) {
+      console.warn('[journal] Save failed:', err);
+      setJournalSync({ state:'local', message:'Trade saved locally. Supabase journal save failed.' });
+      showToast(err.message || 'Journal save failed; kept locally', 'warn', 6000);
+    }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
+    const deleted = trades.find(t => t.id === id);
     const updated = trades.filter(t => t.id !== id);
     setTrades(updated);
     if (sel?.id === id) setSel(updated[0] || null);
+    if (!deleted?.dbId && typeof id === 'string') return;
+    try {
+      await deleteJournalTradeOnServer(deleted?.dbId || id);
+      setJournalSync({ state:'synced', message:'Trade deleted from Supabase journal_trades' });
+    } catch (err) {
+      console.warn('[journal] Delete failed:', err);
+      setJournalSync({ state:'local', message:'Deleted locally. Supabase journal delete failed.' });
+      showToast(err.message || 'Journal delete failed', 'warn', 6000);
+    }
   };
 
   // Build heatmap dynamically from trades — last 30 weekdays
@@ -2923,6 +3139,17 @@ function Journal({ trades, setTrades, plan }) {
         </button>
       </div>
 
+      <div style={{ marginBottom:20, padding:'10px 14px', borderRadius:10,
+        background: journalSync.state === 'synced' ? 'rgba(16,185,129,0.06)' : journalSync.state === 'local' ? 'rgba(245,158,11,0.07)' : 'rgba(99,102,241,0.06)',
+        border: `1px solid ${journalSync.state === 'synced' ? 'rgba(16,185,129,0.22)' : journalSync.state === 'local' ? 'rgba(245,158,11,0.25)' : 'rgba(99,102,241,0.2)'}`,
+        color: journalSync.state === 'synced' ? T.green : journalSync.state === 'local' ? T.amber : T.indigo,
+        fontSize:12, fontWeight:700, display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, flexWrap:'wrap' }}>
+        <span>{journalSync.message}</span>
+        <button onClick={loadJournal} style={{ padding:'5px 12px', borderRadius:7, border:`1px solid ${T.border}`, background:'rgba(255,255,255,0.04)', color:T.sub, fontSize:11, fontWeight:700, cursor:'pointer' }}>
+          Refresh
+        </button>
+      </div>
+
       {journalView === 'analytics' && (
         <JournalAnalytics trades={trades}/>
       )}
@@ -2930,7 +3157,7 @@ function Journal({ trades, setTrades, plan }) {
       {journalView === 'trades' && (<>
 
       {/* ── Free plan soft limit banner ── */}
-      {PLAN_ORDER[plan || 'free'] < PLAN_ORDER['pro'] && trades.length >= 8 && (
+      {!PERSONAL_MODE && PLAN_ORDER[plan || 'free'] < PLAN_ORDER['pro'] && trades.length >= 8 && (
         <div style={{ marginBottom:20, padding:'14px 18px', background:'rgba(99,102,241,0.07)', border:'1px solid rgba(99,102,241,0.28)', borderRadius:12, display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
           <div>
             <div style={{ fontWeight:800, fontSize:14, color:'#818CF8', marginBottom:4 }}>
@@ -6235,6 +6462,7 @@ function PlanGate({ minPlan, children, feature, plan }) {
   const userPlan = plan || LS.get('user_plan', 'free');
   const hasAccess = PLAN_ORDER[userPlan] >= PLAN_ORDER[minPlan];
 
+  if (PERSONAL_MODE) return children;
   if (hasAccess) return children;
 
   return (
@@ -7024,6 +7252,253 @@ function AlgoTradingTab({ user }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// BACKTEST TAB — saved runs + quick server-side smoke backtests
+// ═══════════════════════════════════════════════════════════════════════════
+
+function BacktestEquityChart({ equity }) {
+  const points = (equity || []).map(p => ({
+    label: p.dt ? new Date(p.dt).toLocaleDateString('en-GB', { day:'numeric', month:'short' }) : '',
+    value: safeNum(p.balance, 0) || 0,
+  }));
+  if (points.length < 2) {
+    return <div style={{ height:220, display:'flex', alignItems:'center', justifyContent:'center', color:T.muted, fontSize:13 }}>Run a backtest to build an equity curve</div>;
+  }
+  const W = 900, H = 220, PL = 16, PR = 22, PT = 16, PB = 32;
+  const vals = points.map(p => p.value);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const rng = max - min || 1;
+  const sx = i => PL + (i / Math.max(1, points.length - 1)) * (W - PL - PR);
+  const sy = v => H - PB - ((v - min) / rng) * (H - PT - PB);
+  const coords = points.map((p, i) => [sx(i), sy(p.value)]);
+  const line = coords.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const area = `${line} L${coords[coords.length - 1][0].toFixed(1)},${H - PB} L${coords[0][0].toFixed(1)},${H - PB} Z`;
+  const up = points[points.length - 1].value >= points[0].value;
+  const color = up ? T.green : T.red;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width:'100%', height:H }}>
+      <defs>
+        <linearGradient id="btCurveFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.28"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0"/>
+        </linearGradient>
+      </defs>
+      {[0, 0.5, 1].map(step => {
+        const y = PT + step * (H - PT - PB);
+        return <line key={step} x1={PL} x2={W - PR} y1={y} y2={y} stroke="rgba(148,163,184,0.12)" strokeWidth="1"/>;
+      })}
+      <path d={area} fill="url(#btCurveFill)"/>
+      <path d={line} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/>
+      <circle cx={coords[coords.length - 1][0]} cy={coords[coords.length - 1][1]} r="4.5" fill={color}/>
+      <text x={W - PR} y="20" fill={color} textAnchor="end" fontSize="12" fontWeight="800">{fmtUsd(points[points.length - 1].value, 0)}</text>
+      {[0, Math.floor(points.length / 2), points.length - 1].map((idx) => (
+        <text key={idx} x={sx(idx)} y={H - 9} fill={T.muted} textAnchor="middle" fontSize="10">{points[idx]?.label}</text>
+      ))}
+    </svg>
+  );
+}
+
+function BacktestTab() {
+  const [symbol, setSymbol] = useState('XAU/USD');
+  const [interval, setIntervalTf] = useState('1h');
+  const [bars, setBars] = useState(500);
+  const [riskPct, setRiskPct] = useState(1);
+  const [minConfidence, setMinConfidence] = useState(60);
+  const [runs, setRuns] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState('');
+  const { show: showToast } = useToast();
+
+  const loadRuns = useCallback(async () => {
+    setError('');
+    try {
+      const rows = await fetchBacktestRunsFromServer();
+      setRuns(rows);
+      setSelectedId(current => current || rows[0]?.id || null);
+    } catch (err) {
+      setError(err.message || 'Backtest API unavailable');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadRuns(); }, [loadRuns]);
+
+  useEffect(() => {
+    if (!selectedId) { setDetail(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const next = await fetchBacktestRunFromServer(selectedId);
+        if (!cancelled) setDetail(next);
+      } catch (err) {
+        if (!cancelled) setError(err.message || 'Backtest run load failed');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
+  const runQuickBacktest = async () => {
+    setRunning(true);
+    setError('');
+    try {
+      const result = await runBacktestOnServer({
+        symbol,
+        interval,
+        bars: Number(bars),
+        riskPct: Number(riskPct),
+        minConfidence: Number(minConfidence),
+        initialBalance: 100000,
+        rrTarget: 2,
+      });
+      await loadRuns();
+      setSelectedId(result.run?.id || null);
+      showToast(`Backtest saved: ${symbol} ${safeNum(result.stats?.total_r, 0) >= 0 ? '+' : ''}${safeNum(result.stats?.total_r, 0)}R`, 'success', 6000);
+    } catch (err) {
+      setError(err.message || 'Backtest failed');
+      showToast(err.message || 'Backtest failed', 'error', 7000);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const run = detail?.run || runs.find(r => r.id === selectedId) || null;
+  const trades = detail?.trades || [];
+  const equity = detail?.equity || [];
+  const kpiColor = (value) => safeNum(value, 0) >= 0 ? T.green : T.red;
+  const inputStyle = { padding:'9px 11px', background:'rgba(255,255,255,0.06)', border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, fontWeight:700, outline:'none' };
+
+  return (
+    <div className="pp-grid" style={{ gap:20 }}>
+      <div className="pp-panel" style={{ padding:20 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-end', gap:16, flexWrap:'wrap' }}>
+          <div>
+            <div style={{ fontWeight:900, fontSize:18, marginBottom:5 }}>Backtest Lab</div>
+            <div style={{ color:T.sub, fontSize:13, lineHeight:1.6 }}>Run a quick server-side smoke test and review saved Python/daemon backtest results from Supabase.</div>
+          </div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+            <select value={symbol} onChange={e => setSymbol(e.target.value)} style={inputStyle}>
+              {['XAU/USD','EUR/USD','GBP/USD','USD/JPY','GBP/JPY','NAS100','BTC/USD','ETH/USD'].map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value={interval} onChange={e => setIntervalTf(e.target.value)} style={inputStyle}>
+              <option value="15min">15m</option>
+              <option value="1h">1h</option>
+              <option value="1d">1d</option>
+            </select>
+            <input type="number" min="100" max="1200" value={bars} onChange={e => setBars(e.target.value)} style={{ ...inputStyle, width:88 }} title="Bars"/>
+            <input type="number" min="0.1" max="3" step="0.1" value={riskPct} onChange={e => setRiskPct(e.target.value)} style={{ ...inputStyle, width:76 }} title="Risk %"/>
+            <input type="number" min="50" max="90" value={minConfidence} onChange={e => setMinConfidence(e.target.value)} style={{ ...inputStyle, width:76 }} title="Min confidence"/>
+            <button onClick={runQuickBacktest} disabled={running}
+              style={{ padding:'10px 18px', borderRadius:9, border:'none', background:`linear-gradient(135deg,${T.indigo},${T.blue})`, color:'#fff', fontWeight:900, cursor:running?'wait':'pointer' }}>
+              {running ? 'Running…' : 'Run Backtest'}
+            </button>
+          </div>
+        </div>
+        {error && (
+          <div style={{ marginTop:14, padding:'10px 12px', borderRadius:9, background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', color:T.red, fontSize:12, fontWeight:700 }}>
+            {error}
+          </div>
+        )}
+      </div>
+
+      <div className="pp-grid-2l" style={{ display:'grid', gridTemplateColumns:'0.9fr 2.1fr', gap:20 }}>
+        <div className="pp-panel" style={{ padding:18 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+            <div style={{ fontWeight:800, fontSize:15 }}>Saved Runs</div>
+            <button onClick={loadRuns} style={{ padding:'5px 12px', borderRadius:7, border:`1px solid ${T.border}`, background:'transparent', color:T.muted, fontSize:12, cursor:'pointer' }}>Refresh</button>
+          </div>
+          {loading ? (
+            <div className="pp-skeleton" style={{ height:180 }}/>
+          ) : runs.length === 0 ? (
+            <div style={{ color:T.muted, fontSize:13, lineHeight:1.7, padding:'22px 4px' }}>No backtests saved yet. Run the first smoke test above.</div>
+          ) : (
+            <div style={{ display:'grid', gap:8 }}>
+              {runs.map(r => {
+                const active = r.id === selectedId;
+                return (
+                  <button key={r.id} onClick={() => setSelectedId(r.id)}
+                    style={{ textAlign:'left', padding:'12px 13px', borderRadius:10, border:`1px solid ${active ? 'rgba(99,102,241,0.42)' : 'rgba(255,255,255,0.07)'}`, background:active ? 'rgba(99,102,241,0.1)' : 'rgba(255,255,255,0.025)', cursor:'pointer', color:T.text }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', gap:10 }}>
+                      <strong>{r.symbol}</strong>
+                      <span style={{ color:kpiColor(r.total_r), fontWeight:900 }}>{safeNum(r.total_r, 0) >= 0 ? '+' : ''}{safeNum(r.total_r, 0).toFixed(2)}R</span>
+                    </div>
+                    <div style={{ marginTop:6, color:T.muted, fontSize:11 }}>
+                      {r.total_trades || 0} trades · WR {safeNum(r.win_rate_pct, 0).toFixed(1)}% · {timeAgo(r.created_at)}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="pp-grid" style={{ gap:18 }}>
+          {!run ? (
+            <div className="pp-panel" style={{ padding:34, textAlign:'center', color:T.muted }}>Select or run a backtest.</div>
+          ) : (
+            <>
+              <div className="pp-grid pp-grid-4x">
+                <ShellKpi label="Return" value={`${safeNum(run.total_return_pct, 0) >= 0 ? '+' : ''}${safeNum(run.total_return_pct, 0).toFixed(2)}%`} sub={`${fmtUsd(run.final_balance || 100000, 0)} final balance`} color={kpiColor(run.total_return_pct)}/>
+                <ShellKpi label="Total R" value={`${safeNum(run.total_r, 0) >= 0 ? '+' : ''}${safeNum(run.total_r, 0).toFixed(2)}R`} sub={`${run.total_trades || 0} trades`} color={kpiColor(run.total_r)}/>
+                <ShellKpi label="Win Rate" value={`${safeNum(run.win_rate_pct, 0).toFixed(1)}%`} sub={`${run.wins || 0}W · ${run.losses || 0}L`} color={safeNum(run.win_rate_pct, 0) >= 50 ? T.green : T.red}/>
+                <ShellKpi label="Max DD" value={`${safeNum(run.max_drawdown_pct, 0).toFixed(2)}%`} sub={fmtUsd(run.max_drawdown_usd || 0, 0)} color={safeNum(run.max_drawdown_pct, 0) <= 5 ? T.green : T.red}/>
+              </div>
+
+              <div className="pp-panel" style={{ padding:20 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:10 }}>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:16 }}>{run.symbol} Equity Curve</div>
+                    <div style={{ color:T.muted, fontSize:12, marginTop:4 }}>{run.start_date} → {run.end_date} · PF {safeNum(run.profit_factor, 0).toFixed(2)} · Expectancy {safeNum(run.expectancy_r, 0).toFixed(3)}R</div>
+                  </div>
+                  <Badge label={run.config?.engine || run.config?.tp_strategy || 'backtest'} color={T.indigo}/>
+                </div>
+                <BacktestEquityChart equity={equity}/>
+              </div>
+
+              <div className="pp-panel" style={{ padding:20 }}>
+                <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>Trades</div>
+                {trades.length === 0 ? (
+                  <div style={{ color:T.muted, fontSize:13, padding:'24px 0', textAlign:'center' }}>This run did not produce trades.</div>
+                ) : (
+                  <div style={{ overflowX:'auto' }}>
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                      <thead>
+                        <tr style={{ borderBottom:`1px solid ${T.border}` }}>
+                          {['#','Symbol','Dir','Exit','P&L R','P&L $','Session','Closed'].map(h => (
+                            <th key={h} style={{ padding:'8px 10px', textAlign:'left', color:T.muted, fontSize:11 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {trades.slice(0, 60).map(t => (
+                          <tr key={t.id || t.trade_id} style={{ borderBottom:'1px solid rgba(148,163,184,.07)' }}>
+                            <td style={{ padding:'9px 10px', color:T.muted }}>{t.trade_id}</td>
+                            <td style={{ padding:'9px 10px', fontWeight:800 }}>{t.symbol}</td>
+                            <td style={{ padding:'9px 10px', color:t.direction === 'LONG' ? T.green : T.red, fontWeight:800 }}>{t.direction}</td>
+                            <td style={{ padding:'9px 10px' }}><Badge label={t.exit_reason} color={t.pnl_r > 0 ? T.green : T.red}/></td>
+                            <td style={{ padding:'9px 10px', color:t.pnl_r >= 0 ? T.green : T.red, fontWeight:900 }}>{fmtR(t.pnl_r)}</td>
+                            <td style={{ padding:'9px 10px', color:t.pnl_usd >= 0 ? T.green : T.red, fontWeight:800 }}>{fmtUsd(t.pnl_usd, 0)}</td>
+                            <td style={{ padding:'9px 10px', color:T.sub }}>{t.session}</td>
+                            <td style={{ padding:'9px 10px', color:T.muted }}>{t.close_dt ? timeAgo(t.close_dt) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // APP SHELL
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -7033,6 +7508,7 @@ const TABS = [
   { id:'news',      label:'Calendar',  icon:'📅' },
   { id:'analyze',   label:'Analyze',   icon:'◬' },
   { id:'algo',      label:'Algo',      icon:'📊' },
+  { id:'backtest',  label:'Backtest',  icon:'↺' },
   { id:'journal',   label:'Journal',   icon:'▦' },
   { id:'challenge', label:'Challenge', icon:'◎' },
   { id:'settings',  label:'Settings',  icon:'◉' },
@@ -7055,6 +7531,10 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
   const [notifPerm, setNotifPerm] = useState(() =>
     typeof Notification !== 'undefined' ? Notification.permission : 'unsupported'
   );
+  const handleTradesChange = useCallback((nextTrades) => {
+    setTrades(nextTrades);
+    LS.set('trades', nextTrades);
+  }, []);
 
   // ── Plan tier ────────────────────────────────────────────────────────────
   const [userPlan, setUserPlan] = useState(() => LS.get('user_plan', 'free'));
@@ -7208,7 +7688,8 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
               {screen === 'news'      && <EconomicCalendarTab/>}
               {screen === 'analyze'   && <CheckTrade account={accountView} phase={phase} onNavigate={setScreen}/>}
               {screen === 'algo'      && <AlgoTradingTab user={user}/>}
-              {screen === 'journal'   && <Journal trades={trades} setTrades={t => { setTrades(t); LS.set('trades', t); }} plan={userPlan}/>}
+              {screen === 'backtest'  && <BacktestTab/>}
+              {screen === 'journal'   && <Journal trades={trades} setTrades={handleTradesChange} plan={userPlan}/>}
               {screen === 'risk'      && <RiskCalc account={accountView}/>}
               {screen === 'analytics' && <OutcomeAnalyticsPanel data={appData}/>}
               {screen === 'challenge' && <ChallengeMode account={accountView} phase={phase} userId={user?.id}/>}

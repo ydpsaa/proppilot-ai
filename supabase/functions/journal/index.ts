@@ -17,15 +17,24 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.2';
 
 const SB_URL   = Deno.env.get('SUPABASE_URL')!;
 const SB_SKEY  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const SB_ANON  = Deno.env.get('SUPABASE_ANON_KEY') || '';
 const GROQ_KEY = Deno.env.get('GROQ_API_KEY') || '';
 
+// Service-role client for all DB operations (bypasses RLS)
 const sb = createClient(SB_URL, SB_SKEY, { auth: { persistSession: false } });
+
+// Anon client used only for JWT verification
+const sbAnon = createClient(SB_URL, SB_ANON, { auth: { persistSession: false } });
 
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Headers': 'Authorization,Content-Type,apikey,x-proppilot-cron-secret',
   'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
 };
+
+// For now the app has a single paper account (id=1).
+// When multi-user is needed, look up user_profiles by user_id here.
+const ACCOUNT_ID = 1;
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -36,6 +45,15 @@ function json(data: unknown, status = 200) {
 
 function err(msg: string, status = 400) {
   return json({ error: msg }, status);
+}
+
+// Verify the Bearer JWT from the request. Returns the user or null.
+async function requireAuth(req: Request): Promise<{ id: string } | null> {
+  const auth = req.headers.get('Authorization') || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return null;
+  const { data } = await sbAnon.auth.getUser(token);
+  return data.user ?? null;
 }
 
 // ── Groq AI analysis for a single trade ─────────────────────────────────────
@@ -113,9 +131,12 @@ Respond ONLY with valid JSON in this exact format:
 
 // ── GET handler ──────────────────────────────────────────────────────────────
 
-async function handleGet(url: URL) {
+async function handleGet(url: URL, req: Request) {
+  const user = await requireAuth(req);
+  if (!user) return err('Authentication required', 401);
+
   const action     = url.searchParams.get('action') || 'list';
-  const account_id = parseInt(url.searchParams.get('account_id') || '1');
+  const account_id = ACCOUNT_ID;
   const limit      = parseInt(url.searchParams.get('limit')  || '50');
   const offset     = parseInt(url.searchParams.get('offset') || '0');
 
@@ -207,6 +228,9 @@ async function handleGet(url: URL) {
 // ── POST handler ─────────────────────────────────────────────────────────────
 
 async function handlePost(req: Request) {
+  const user = await requireAuth(req);
+  if (!user) return err('Authentication required', 401);
+
   let body: Record<string, unknown>;
   try {
     body = await req.json();
@@ -223,9 +247,12 @@ async function handlePost(req: Request) {
       return err('trade.symbol and trade.direction are required');
     }
 
+    // Always inject server-side account_id (never trust client)
+    const tradeWithAccount = { ...trade, account_id: ACCOUNT_ID };
+
     const { data, error } = await sb
       .from('journal_trades')
-      .insert(trade)
+      .insert(tradeWithAccount)
       .select()
       .single();
 
@@ -328,7 +355,7 @@ async function handlePost(req: Request) {
 
   // ── REFRESH PATTERNS ─────────────────────────────────────────────────────
   if (action === 'refresh_patterns') {
-    const account_id = (body.account_id as number) || 1;
+    const account_id = ACCOUNT_ID;
 
     const { data, error } = await sb
       .rpc('fn_refresh_journal_patterns', { p_account_id: account_id });
@@ -339,7 +366,8 @@ async function handlePost(req: Request) {
 
   // ── PATTERN MATCH for current setup ──────────────────────────────────────
   if (action === 'pattern_match') {
-    const { account_id = 1, symbol, session, direction, strategy } = body as Record<string, unknown>;
+    const { symbol, session, direction, strategy } = body as Record<string, unknown>;
+    const account_id = ACCOUNT_ID;
     if (!symbol || !session || !direction) {
       return err('symbol, session, direction required');
     }
@@ -358,7 +386,7 @@ async function handlePost(req: Request) {
 
   // ── BATCH ANALYZE — queue all un-analyzed trades ──────────────────────────
   if (action === 'batch_analyze') {
-    const account_id = (body.account_id as number) || 1;
+    const account_id = ACCOUNT_ID;
     const max = (body.max as number) || 5;
 
     const { data: pending, error: fetchErr } = await sb
@@ -420,7 +448,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const url = new URL(req.url);
-    if (req.method === 'GET')  return await handleGet(url);
+    if (req.method === 'GET')  return await handleGet(url, req);
     if (req.method === 'POST') return await handlePost(req);
     return err('Method not allowed', 405);
   } catch (e) {
