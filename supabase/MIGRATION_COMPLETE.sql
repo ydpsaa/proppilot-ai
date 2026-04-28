@@ -35,10 +35,12 @@
 -- Order: extensions → tables → phase1/2/3 → user_profiles → security → cron jobs
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- ── STEP 1: Set cron secret (same value you used in `supabase secrets set`) ──
--- Replace YOUR_CRON_SECRET_HERE with your actual secret before running!
-ALTER DATABASE postgres SET "app.proppilot_cron_secret" = 'YOUR_CRON_SECRET_HERE';
-SELECT set_config('app.proppilot_cron_secret', 'YOUR_CRON_SECRET_HERE', false);
+-- ── STEP 1: Cron secret ──────────────────────────────────────────────────────
+-- NOTE: ALTER DATABASE requires superuser and cannot be run in the SQL Editor.
+-- The cron secret is validated at runtime by Edge Functions via Supabase Secrets.
+-- Run this after migration via Supabase CLI:
+--   supabase secrets set PROPILOT_CRON_SECRET=b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2
+-- ─────────────────────────────────────────────────────────────────────────────
 
 
 -- ═══ FULL MIGRATION (base tables) ═══
@@ -1562,16 +1564,7 @@ CREATE POLICY "Authenticated insert execution_log"
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
-DO $$
-DECLARE
-  missing_secret boolean;
-BEGIN
-  missing_secret := nullif('b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2', '') IS NULL;
-  IF missing_secret THEN
-    RAISE EXCEPTION 'Missing app.proppilot_cron_secret. Set it before scheduling protected jobs.';
-  END IF;
-END;
-$$;
+-- (Cron secret check skipped — set via `supabase secrets set PROPILOT_CRON_SECRET=...`)
 
 DO $$
 DECLARE
