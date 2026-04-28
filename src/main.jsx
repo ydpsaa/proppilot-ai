@@ -149,12 +149,15 @@ const LS = {
     } catch { return fallback; }
   },
   set: (key, val) => {
-    try { localStorage.setItem('pp_' + key, JSON.stringify(val)); } catch {}
+    try { localStorage.setItem('pp_' + key, JSON.stringify(val)); } catch {
+      // localStorage can be unavailable in private browsing modes.
+    }
   },
 };
 
 // Pure SVG area chart — no external deps
 function PriceChart({ data }) {
+  const [hover, setHover] = useState(null);
   const W = 560, H = 170, PL = 5, PR = 5, PT = 5, PB = 22;
   if (!data || data.length < 2) return null;
   const vals = data.map(d => d.v);
@@ -166,7 +169,6 @@ function PriceChart({ data }) {
   const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
   const area = `${line} L${pts[pts.length-1][0].toFixed(1)},${(H-PB).toFixed(1)} L${pts[0][0].toFixed(1)},${(H-PB).toFixed(1)} Z`;
   const tickIdxs = [0, Math.floor(data.length/4), Math.floor(data.length/2), Math.floor(data.length*3/4), data.length-1];
-  const [hover, setHover] = useState(null);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'100%',overflow:'visible'}}
       onMouseMove={e => {
@@ -481,6 +483,9 @@ const DEFAULT_TRADES = [
   { id:4, date:'14 Apr', sym:'GBPUSD', dir:'LONG',  pnl:+280, rr:'1:1.5', score:81, win:true,  issue:null },
   { id:5, date:'14 Apr', sym:'EURUSD', dir:'LONG',  pnl:-150, rr:'1:1.3', score:38, win:false, issue:'Revenge trade — entered 18 min after previous loss, against H4 trend' },
 ];
+void RESULTS;
+void DEFAULT_HEATMAP;
+void DEFAULT_TRADES;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THEME
@@ -494,6 +499,22 @@ const T = {
 };
 const card  = { background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:24, backdropFilter:'blur(24px) saturate(160%)', WebkitBackdropFilter:'blur(24px) saturate(160%)', boxShadow:'0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.14)' };
 const cardS = { background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:16, padding:16, backdropFilter:'blur(24px) saturate(160%)', WebkitBackdropFilter:'blur(24px) saturate(160%)', boxShadow:'0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.14)' };
+
+const LIVE_TICKER_PAIRS = [
+  { sym:'XAU/USD', label:'Gold',      flag:'🥇' },
+  { sym:'EUR/USD', label:'EUR/USD',   flag:'🇪🇺' },
+  { sym:'GBP/USD', label:'GBP/USD',   flag:'🇬🇧' },
+  { sym:'GBP/JPY', label:'GBP/JPY',   flag:'🔵' },
+  { sym:'NAS100',  label:'NAS100',    flag:'📊' },
+];
+
+const CHECK_TRADE_LOADING_STEPS = [
+  'Fetching live candles…',
+  'Checking news calendar…',
+  'Running technical analysis…',
+  'Calculating entries, SL/TP, risk…',
+  'Generating AI rationale…',
+];
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ATOMS
@@ -513,6 +534,7 @@ const KVRow = ({ k, v, vc }) => (
 );
 
 const Divider = () => <div style={{ height:1, background:T.border, margin:'16px 0' }} />;
+void Divider;
 
 function RiskBar({ label, value, max, sublabel }) {
   const pct = Math.min(value / max * 100, 100);
@@ -572,6 +594,7 @@ function fmtPct(v) {
   if (v == null || Number.isNaN(Number(v))) return '—';
   return `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(1)}%`;
 }
+void fmtPct;
 
 function timeAgo(iso) {
   if (!iso) return '—';
@@ -936,7 +959,9 @@ function Dashboard({ account, phase }) {
     try {
       const cvt = await mdFetchOHLCV('XAU/USD', '1h', 50);
       setCandles(cvt.map(c => ({ t: (c.t || '').slice(11, 16), v: c.v })));
-    } catch {}
+    } catch {
+      setCandles([]);
+    }
   }, []);
 
   const fetchPrices = useCallback(async () => {
@@ -944,7 +969,9 @@ function Dashboard({ account, phase }) {
       const pm = await mdFetchPrices(['XAU/USD','EUR/USD','GBP/USD','USD/JPY']);
       const valid = Object.fromEntries(Object.entries(pm).filter(([,v]) => v != null));
       if (Object.keys(valid).length) setPrices(valid);
-    } catch {}
+    } catch {
+      setPrices({});
+    }
   }, []);
 
   const fetchCalendar = useCallback(async () => {
@@ -974,7 +1001,9 @@ function Dashboard({ account, phase }) {
         for (const s of d) { if (!latest[s.symbol]) latest[s.symbol] = s; }
         setSignals(latest);
       }
-    } catch {}
+    } catch {
+      setSignals({});
+    }
   }, []);
 
   const fetchAiRead = useCallback(async () => {
@@ -982,7 +1011,9 @@ function Dashboard({ account, phase }) {
       const r = await fetch(`${SB_URL}/rest/v1/bot_memory?select=market_notes&order=run_at.desc&limit=1`, { headers: SB_HDR });
       const d = await r.json();
       if (Array.isArray(d) && d[0]?.market_notes) setAiRead(d[0].market_notes);
-    } catch {}
+    } catch {
+      setAiRead('');
+    }
   }, []);
 
   useEffect(() => {
@@ -1154,6 +1185,7 @@ function Dashboard({ account, phase }) {
     </div>
   );
 }
+void Dashboard;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CHALLENGE MODE — FULL PROP TRADING OS
@@ -1173,8 +1205,6 @@ function ChallengeSetupWizard({ onSave }) {
   const type  = (firm && typeId) ? firm.types[typeId] : null;
 
   const inp = { width:'100%', padding:'10px 14px', background:'rgba(255,255,255,0.06)', border:`1px solid ${T.border}`, borderRadius:9, color:T.text, fontSize:14, outline:'none', boxSizing:'border-box' };
-
-  const canNext = [firmId, typeId, size].slice(0, step+1).every(Boolean);
 
   const handleSave = () => {
     onSave({ firmId, typeId, size, startDate, curPnl:+curPnl, tradeDays:+tradeDays, curPhaseIdx:+curPhase });
@@ -1361,7 +1391,7 @@ function ChallengeSetupWizard({ onSave }) {
   );
 }
 
-function ChallengeTracker({ cfg, account, onReset, userId }) {
+function ChallengeTracker({ cfg, onReset, userId }) {
   const firm    = PROP_FIRMS[cfg.firmId];
   const type    = firm.types[cfg.typeId];
   const phases  = type.phases;
@@ -1523,7 +1553,7 @@ function ChallengeTracker({ cfg, account, onReset, userId }) {
               <input type="number" value={tradeDays} onChange={e => setTradeDays(+e.target.value)} style={inp2}/>
             </div>
             <div>
-              <div style={{ color:T.muted, fontSize:11, marginBottom:8, textTransform:'uppercase', letterSpacing:'0.09em' }}>Today's P&L ($)</div>
+              <div style={{ color:T.muted, fontSize:11, marginBottom:8, textTransform:'uppercase', letterSpacing:'0.09em' }}>Today&apos;s P&L ($)</div>
               <input type="number" value={todayPnl} onChange={e => setTodayPnl(+e.target.value)} placeholder="−150" style={inp2}/>
             </div>
           </div>
@@ -1569,7 +1599,7 @@ function ChallengeTracker({ cfg, account, onReset, userId }) {
             </div>
             <div style={{ textAlign:'right' }}>
               <div style={{ fontSize:34, fontWeight:900, color: curPnl >= 0 ? T.green : T.red }}>{curPnl >= 0 ? '+' : ''}${curPnl.toLocaleString()}</div>
-              <div style={{ color:T.muted, fontSize:13 }}>This month's P&L</div>
+              <div style={{ color:T.muted, fontSize:13 }}>This month&apos;s P&L</div>
             </div>
           </div>
         </div>
@@ -1675,6 +1705,8 @@ function ChallengeTracker({ cfg, account, onReset, userId }) {
 }
 
 function ChallengeMode({ account, phase, userId }) {
+  void account;
+  void phase;
   const [challenge, setChallenge] = useState(() => LS.get('challenge', null));
 
   useEffect(() => {
@@ -1843,7 +1875,6 @@ function _runAnalysis({ candles, dir, sym, account, phase, newsEvents }) {
 
   // ── Trend bias ──
   const bull20_50    = ema20 > ema50;
-  const aboveEma20   = price > ema20;
   const aboveEma50   = price > ema50;
   const aboveEma200  = ema200 > 0 ? price > ema200 : null;
   const htfBullish   = bull20_50 && aboveEma50 && (aboveEma200 === null || aboveEma200);
@@ -1981,6 +2012,7 @@ function _runAnalysis({ candles, dir, sym, account, phase, newsEvents }) {
 // ── Shared chart component (TradingView Lightweight Charts) ──────────────
 // Shows candlesticks + EMA20/50 + BB bands + SL/Entry/TP price lines
 function TradeChart({ candles, levels, dir, tf }) {
+  void dir;
   const containerRef = useRef(null);
   const chartRef     = useRef(null);
 
@@ -2083,7 +2115,7 @@ function TradeChart({ candles, levels, dir, tf }) {
     ro.observe(containerRef.current);
 
     return () => { ro.disconnect(); chart.remove(); chartRef.current = null; };
-  }, [candles, levels]);
+  }, [candles, levels, tf]);
 
   return (
     <div style={{ position:'relative' }}>
@@ -2145,7 +2177,7 @@ function CheckTrade({ account, phase, onNavigate }) {
   const [dir,          setDir]         = useState(() => pendingSig?.dir || 'LONG');
   const [loading,      setLoading]     = useState(false);
   const [result,       setResult]      = useState(null);
-  const [loadStep,     setStep]        = useState('');
+  const [,             setStep]        = useState('');
   const [prices,       setPrices]      = useState({});
   const [chartCandles, setChartCandles]= useState([]);
 
@@ -2183,7 +2215,9 @@ function CheckTrade({ account, phase, onNavigate }) {
           ? calData.filter(e => e.date?.startsWith(todayISO) && e.impact === 'High')
           : [];
       }
-    } catch {}
+    } catch {
+      newsEvents = [];
+    }
 
     // ── Fetch OHLCV — Yahoo Finance via market-data Edge Function
     let candles = null;
@@ -2226,11 +2260,10 @@ function CheckTrade({ account, phase, onNavigate }) {
   const sigCol  = !r ? T.green : vd===dir ? (dir==='LONG'?T.green:T.red) : vd==='NO TRADE'?T.red:T.yellow;
   const compCol = !r ? T.green : r.compliance==='COMPLIANT'?T.green:T.yellow;
 
-  const LoadingSteps = ['Fetching live candles…','Checking news calendar…','Running technical analysis…','Calculating entries, SL/TP, risk…','Generating AI rationale…'];
   const [stepIdx, setStepIdx] = useState(0);
   useEffect(() => {
     if (!loading) { setStepIdx(0); return; }
-    const t = setInterval(() => setStepIdx(i => (i+1) % LoadingSteps.length), 900);
+    const t = setInterval(() => setStepIdx(i => (i+1) % CHECK_TRADE_LOADING_STEPS.length), 900);
     return () => clearInterval(t);
   }, [loading]);
 
@@ -2274,7 +2307,7 @@ function CheckTrade({ account, phase, onNavigate }) {
 
           <button onClick={runAnalysis} disabled={loading}
             style={{ width:'100%', padding:15, border:'none', borderRadius:11, cursor:loading?'not-allowed':'pointer', background:loading?`${T.amber}22`:`linear-gradient(135deg,${T.amber},#C96000)`, color:loading?T.amber:'#000', fontSize:15, fontWeight:900, letterSpacing:'0.04em', transition:'all 0.2s' }}>
-            {loading ? `⏳  ${LoadingSteps[stepIdx]}` : '🔍  ANALYZE THIS TRADE'}
+            {loading ? `⏳  ${CHECK_TRADE_LOADING_STEPS[stepIdx]}` : '🔍  ANALYZE THIS TRADE'}
           </button>
 
           {ph.newsBlock && (
@@ -2331,9 +2364,9 @@ function CheckTrade({ account, phase, onNavigate }) {
         {loading && (
           <div style={{ ...card, minHeight:460, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:20 }}>
             <div style={{ fontSize:56 }}>🧠</div>
-            <div style={{ color:T.amber, fontSize:16, fontWeight:700 }}>{LoadingSteps[stepIdx]}</div>
+            <div style={{ color:T.amber, fontSize:16, fontWeight:700 }}>{CHECK_TRADE_LOADING_STEPS[stepIdx]}</div>
             <div style={{ display:'flex', gap:6 }}>
-              {LoadingSteps.map((_,i) => (
+              {CHECK_TRADE_LOADING_STEPS.map((_,i) => (
                 <div key={i} style={{ width:6, height:6, borderRadius:3, background: i===stepIdx?T.amber:'rgba(255,255,255,0.15)', transition:'background 0.3s' }}/>
               ))}
             </div>
@@ -2636,7 +2669,9 @@ function JournalAnalytics({ trades }) {
     try {
       const d = new Date(t.date + ' ' + new Date().getFullYear());
       if (!isNaN(d)) { byDow[d.getDay()].pnl += (t.pnl||0); byDow[d.getDay()].count++; }
-    } catch {}
+    } catch {
+      // Ignore malformed trade dates.
+    }
   });
 
   // ── Score distribution buckets (0-25, 26-50, 51-75, 76-100)
@@ -2666,7 +2701,9 @@ function JournalAnalytics({ trades }) {
         const key = d.toLocaleDateString('en-GB', { month:'short', year:'2-digit' });
         byMonth[key] = (byMonth[key] || 0) + (t.pnl || 0);
       }
-    } catch {}
+    } catch {
+      // Ignore malformed trade dates.
+    }
   });
   const monthRows = Object.entries(byMonth).slice(-6);
 
@@ -2847,8 +2884,6 @@ function Journal({ trades, setTrades, plan }) {
     // Generate the last 30 calendar days, skip weekends
     const days = [];
     const todayDate = new Date();
-    const todayLabel = todayDate.toLocaleDateString('en-GB', { day:'numeric', month:'short' }).replace(/ /g, '').replace('Jan','J').replace('Feb','F').replace('Mar','M').replace('Apr','A').replace('May','My').replace('Jun','Jn').replace('Jul','Jl').replace('Aug','Au').replace('Sep','S').replace('Oct','O').replace('Nov','N').replace('Dec','D');
-
     for (let offset = 29; offset >= 0; offset--) {
       const d = new Date(todayDate);
       d.setDate(d.getDate() - offset);
@@ -3573,8 +3608,10 @@ function SignalNote({ signalId }) {
 
   // Load on mount
   useEffect(() => {
-    try { setText(localStorage.getItem(key) || ''); } catch {}
-  }, [signalId]);
+    try { setText(localStorage.getItem(key) || ''); } catch {
+      setText('');
+    }
+  }, [key]);
 
   const save = () => {
     try {
@@ -3582,7 +3619,9 @@ function SignalNote({ signalId }) {
       else localStorage.removeItem(key);
       setSaved(true);
       setTimeout(() => setSaved(false), 1800);
-    } catch {}
+    } catch {
+      // localStorage can fail in restricted browser contexts.
+    }
   };
 
   const hasNote = text.trim().length > 0;
@@ -3744,13 +3783,6 @@ function PosSizer({ symbol = '', entry = 0, sl = 0, tp1 = 0, tp2 = 0, accountBal
 // LIVE PRICE TICKER
 // ═══════════════════════════════════════════════════════════════════════════
 function LivePriceTicker() {
-  const PAIRS = [
-    { sym:'XAU/USD', label:'Gold',      flag:'🥇' },
-    { sym:'EUR/USD', label:'EUR/USD',   flag:'🇪🇺' },
-    { sym:'GBP/USD', label:'GBP/USD',   flag:'🇬🇧' },
-    { sym:'GBP/JPY', label:'GBP/JPY',   flag:'🔵' },
-    { sym:'NAS100',  label:'NAS100',    flag:'📊' },
-  ];
   const [prices, setPrices]   = useState({});
   const [prev,   setPrev]     = useState({});
   const [ts,     setTs]       = useState(null);
@@ -3758,13 +3790,15 @@ function LivePriceTicker() {
 
   const fetchPrices = useCallback(async () => {
     try {
-      const syms = PAIRS.map(p => p.sym);
+      const syms = LIVE_TICKER_PAIRS.map(p => p.sym);
       const priceMap = await mdFetchPrices(syms);
-      setPrev(prev => ({ ...prev, ...prices }));
       const next = {};
-      PAIRS.forEach(p => { if (priceMap[p.sym] != null) next[p.sym] = priceMap[p.sym]; });
+      LIVE_TICKER_PAIRS.forEach(p => { if (priceMap[p.sym] != null) next[p.sym] = priceMap[p.sym]; });
       if (Object.keys(next).length) {
-        setPrices(next);
+        setPrices(current => {
+          setPrev(current);
+          return next;
+        });
         setTs(new Date());
         setErr(false);
       }
@@ -3786,7 +3820,7 @@ function LivePriceTicker() {
       border:'1px solid rgba(255,255,255,0.07)',
       borderRadius: 12,
     }}>
-      {PAIRS.map((p, i) => {
+      {LIVE_TICKER_PAIRS.map((p, i) => {
         const cur  = prices[p.sym];
         const prv  = prev[p.sym];
         const up   = cur != null && prv != null && cur > prv;
@@ -3799,7 +3833,7 @@ function LivePriceTicker() {
           <div key={p.sym} style={{
             flex:'0 0 auto', minWidth: 140,
             padding:'11px 18px',
-            borderRight: i < PAIRS.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+            borderRight: i < LIVE_TICKER_PAIRS.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
             display:'flex', flexDirection:'column', gap: 3,
           }}>
             <div style={{ display:'flex', alignItems:'center', gap: 6 }}>
@@ -3837,6 +3871,8 @@ function LivePriceTicker() {
 // TODAY SCREEN — Morning briefing: Can I trade? What's active? Daily P&L.
 // ═══════════════════════════════════════════════════════════════════════════
 function TodayScreen({ data, phase, accountView, trades, onNavigate }) {
+  void phase;
+  void accountView;
   const ch       = LS.get('challenge', null);
   const firm     = ch ? PROP_FIRMS[ch.firmId] : null;
   const type     = (firm && ch?.typeId) ? firm.types[ch.typeId] : null;
@@ -3885,9 +3921,6 @@ function TodayScreen({ data, phase, accountView, trades, onNavigate }) {
   const activeSignals = allSignals.filter(s =>
     ['LONG_NOW','SHORT_NOW'].includes(s.signal_state) && s.outcome === 'OPEN'
   );
-  const today = new Date().toISOString().slice(0,10);
-  const todaySigCount = allSignals.filter(s => s.created_at?.startsWith(today)).length;
-
   return (
     <div className="pp-grid" style={{ gap:20 }}>
 
@@ -4027,7 +4060,7 @@ function TodayScreen({ data, phase, accountView, trades, onNavigate }) {
       {/* ── TODAY'S SESSION SUMMARY ── */}
       <div className="pp-panel" style={{ padding:20 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-          <div style={{ fontWeight:700, fontSize:15 }}>Today's Session</div>
+          <div style={{ fontWeight:700, fontSize:15 }}>Today&apos;s Session</div>
           <button onClick={() => onNavigate('journal')} style={{ padding:'6px 14px', background:'rgba(255,255,255,0.04)', border:`1px solid ${T.border}`, borderRadius:8, color:T.sub, fontSize:12, cursor:'pointer' }}>
             Open Journal →
           </button>
@@ -4089,6 +4122,7 @@ function TodayScreen({ data, phase, accountView, trades, onNavigate }) {
 }
 
 function ExecutiveDashboard({ data, phase }) {
+  void phase;
   const { show: showToast } = useToast();
   const account       = data.account || {};
   const positions     = data.positions || [];
@@ -4379,6 +4413,7 @@ function ExecutiveDashboard({ data, phase }) {
     </div>
   );
 }
+void ExecutiveDashboard;
 
 function OutcomeAnalyticsPanel({ data }) {
   const signals = data.signals || [];
@@ -4534,7 +4569,7 @@ function SignalsWorkspace({ onNavigate }) {
   const [tf,     setTf]     = useState(() => LS.get('sig_tf', '1h'));
   const [dir,    setDir]    = useState('AUTO');
   const [result, setResult] = useState(null);
-  const [candles, setCandles] = useState(null);
+  const [, setCandles] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error,  setError]  = useState(null);
   const [demoMode, setDemoMode] = useState(false);
@@ -4593,7 +4628,7 @@ function SignalsWorkspace({ onNavigate }) {
       cvt = await mdFetchOHLCV(sym, tf, 200);
       // Cache successful fetch
       LS.set(CACHE_KEY, { data: cvt, ts: Date.now() });
-    } catch (apiErr) {
+    } catch {
       // Fallback: use cached data if < 4 hours old
       if (cached && (Date.now() - cached.ts) < 4 * 3600000) {
         cvt = cached.data;
@@ -4651,13 +4686,18 @@ function SignalsWorkspace({ onNavigate }) {
         phase: 's1',
         newsEvents: [],
       });
+      const executable = analysis.verdict === effectDir;
 
       setResult({
         ...analysis,
-        direction: effectDir,
+        direction: executable ? effectDir : null,
+        biasDirection: effectDir,
+        executable,
         autoDir,
         price,
-        slNum, tp1Num, tp2Num,
+        slNum: executable ? slNum : null,
+        tp1Num: executable ? tp1Num : null,
+        tp2Num: executable ? tp2Num : null,
         tf,
       });
     } catch (e) {
@@ -4680,10 +4720,25 @@ function SignalsWorkspace({ onNavigate }) {
   useEffect(() => { LS.set('sig_tf', tf); }, [tf]);
 
   const verdictColor = result
-    ? result.verdict === result.direction ? T.green
+    ? result.executable ? T.green
     : result.verdict === 'NO TRADE' ? T.red
     : T.amber
     : T.muted;
+  const algoDerivedDir = algoSignal
+    ? (['LONG_NOW','WAIT_LONG'].includes(algoSignal.verdict) ? 'LONG'
+      : ['SHORT_NOW','WAIT_SHORT'].includes(algoSignal.verdict) ? 'SHORT'
+      : null)
+    : null;
+  const activeAlgoDir = algoPosition?.direction || algoDerivedDir;
+  const algoBlocksTrade = Boolean(
+    result &&
+    algoSignal &&
+    !algoPosition &&
+    !['LONG_NOW','SHORT_NOW','WAIT_LONG','WAIT_SHORT'].includes(algoSignal.verdict)
+  );
+  const engineConflict = Boolean(result?.direction && activeAlgoDir && result.direction !== activeAlgoDir);
+  const tradeExecutable = Boolean(result?.executable && !algoBlocksTrade && !engineConflict);
+  const displayDirection = tradeExecutable ? result.direction : null;
 
   return (
     <div className="pp-grid" style={{ gap: 20 }}>
@@ -4765,16 +4820,27 @@ function SignalsWorkspace({ onNavigate }) {
 
           {/* ── Conflict / Consensus banner ── */}
           {(() => {
-            const algoDir = algoSignal
-              ? (['LONG_NOW','WAIT_LONG'].includes(algoSignal.verdict) ? 'LONG'
-                :['SHORT_NOW','WAIT_SHORT'].includes(algoSignal.verdict) ? 'SHORT'
-                : null)
-              : null;
             const posDir = algoPosition?.direction || null;
-            const activeAlgoDir = posDir || algoDir;
             const taDir = result.direction;
-            const conflict = activeAlgoDir && taDir && activeAlgoDir !== taDir;
+            const conflict = engineConflict;
             const confirmed = activeAlgoDir && taDir && activeAlgoDir === taDir;
+
+            if (algoBlocksTrade) return (
+              <div style={{ marginBottom: 14, padding: '12px 16px', borderRadius: 10,
+                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.28)',
+                display:'flex', alignItems:'flex-start', gap: 12 }}>
+                <span style={{ fontSize: 20, flexShrink: 0 }}>⏸</span>
+                <div>
+                  <div style={{ color: T.amber, fontSize: 13, fontWeight: 800, marginBottom: 4 }}>
+                    ALGO BLOCK — latest SMC/ICT verdict is {algoSignal.verdict}
+                  </div>
+                  <div style={{ color: T.sub, fontSize: 12, lineHeight: 1.6 }}>
+                    The lower TA panel may show a directional bias, but paper entries follow the Algo Engine.
+                    Wait for WAIT/LONG_NOW/SHORT_NOW from SMC before validating or sizing this setup.
+                  </div>
+                </div>
+              </div>
+            );
 
             if (conflict) return (
               <div style={{ marginBottom: 14, padding: '12px 16px', borderRadius: 10,
@@ -4858,15 +4924,27 @@ function SignalsWorkspace({ onNavigate }) {
             <div style={{ flex: 1, minWidth: 200 }}>
               <div style={{ display:'flex', alignItems:'center', gap: 10, marginBottom: 6, flexWrap:'wrap' }}>
                 <div style={{ fontWeight: 900, fontSize: 22, letterSpacing:'-.02em' }}>{sym}</div>
-                <div style={{
-                  fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 6,
-                  background: result.direction === 'LONG' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
-                  color: result.direction === 'LONG' ? T.green : T.red,
-                }}>
-                  {result.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}
-                </div>
+                {displayDirection ? (
+                  <div style={{
+                    fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 6,
+                    background: displayDirection === 'LONG' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                    color: displayDirection === 'LONG' ? T.green : T.red,
+                  }}>
+                    {displayDirection === 'LONG' ? '🟢 LONG' : '🔴 SHORT'}
+                  </div>
+                ) : (
+                  <div style={{
+                    fontSize: 11, fontWeight: 800, padding: '3px 10px', borderRadius: 6,
+                    background: 'rgba(148,163,184,0.12)',
+                    color: T.muted,
+                  }}>
+                    ⏸ {result.verdict}
+                  </div>
+                )}
                 {dir === 'AUTO' && (
-                  <div style={{ fontSize: 10, color: T.muted, fontStyle:'italic' }}>auto-detected</div>
+                  <div style={{ fontSize: 10, color: T.muted, fontStyle:'italic' }}>
+                    bias: {result.biasDirection || result.autoDir}
+                  </div>
                 )}
                 <div style={{ fontSize: 10, color: T.muted, marginLeft:'auto' }}>
                   News risk: <b style={{ color: result.newsRisk === 'HIGH' ? T.red : result.newsRisk === 'MED' ? T.amber : T.green }}>{result.newsRisk}</b>
@@ -4877,33 +4955,48 @@ function SignalsWorkspace({ onNavigate }) {
                 {fmtPrice(sym, result.price)}
               </div>
 
-              <TpSlBar
-                entry={result.price}
-                tp1={result.tp1Num}
-                tp2={result.tp2Num}
-                sl={result.slNum}
-                direction={result.direction}
-              />
+              {tradeExecutable ? (
+                <TpSlBar
+                  entry={result.price}
+                  tp1={result.tp1Num}
+                  tp2={result.tp2Num}
+                  sl={result.slNum}
+                  direction={result.direction}
+                />
+              ) : (
+                <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.18)', color:T.amber, fontSize:12, fontWeight:700 }}>
+                  No executable setup. Bias is {result.biasDirection}, but {algoBlocksTrade ? 'Algo Engine currently blocks entries.' : 'entry rules are not confirmed.'}
+                </div>
+              )}
             </div>
 
             {/* Levels table */}
             <div style={{ minWidth: 148 }}>
-              {[
-                ['Entry', result.price,   T.text],
-                ['SL',    result.slNum,   T.red],
-                ['TP1',   result.tp1Num,  '#34D399'],
-                ['TP2',   result.tp2Num,  T.green],
-              ].map(([lbl, val, col]) => (
-                <div key={lbl} style={{ display:'flex', justifyContent:'space-between', gap: 20, marginBottom: 8 }}>
-                  <span style={{ color: T.muted, fontSize: 11, fontWeight: 700 }}>{lbl}</span>
-                  <span style={{ color: col, fontSize: 12, fontWeight: 800, fontFamily:'monospace' }}>
-                    {fmtPrice(sym, val)}
-                  </span>
+              {tradeExecutable ? (
+                <>
+                  {[
+                    ['Entry', result.price,   T.text],
+                    ['SL',    result.slNum,   T.red],
+                    ['TP1',   result.tp1Num,  '#34D399'],
+                    ['TP2',   result.tp2Num,  T.green],
+                  ].map(([lbl, val, col]) => (
+                    <div key={lbl} style={{ display:'flex', justifyContent:'space-between', gap: 20, marginBottom: 8 }}>
+                      <span style={{ color: T.muted, fontSize: 11, fontWeight: 700 }}>{lbl}</span>
+                      <span style={{ color: col, fontSize: 12, fontWeight: 800, fontFamily:'monospace' }}>
+                        {fmtPrice(sym, val)}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ borderTop:`1px solid ${T.border}`, paddingTop: 8, fontSize: 10, color: T.sub }}>
+                    R:R 1:{(Math.abs(result.tp1Num - result.price) / Math.abs(result.price - result.slNum)).toFixed(1)} / 1:{(Math.abs(result.tp2Num - result.price) / Math.abs(result.price - result.slNum)).toFixed(1)}
+                  </div>
+                </>
+              ) : (
+                <div style={{ padding: '10px 12px', borderRadius: 8, background:'rgba(255,255,255,0.035)', border:`1px solid ${T.border}`, color:T.sub, fontSize:12, lineHeight:1.6 }}>
+                  <div style={{ color:T.text, fontWeight:800, marginBottom:4 }}>No trade levels</div>
+                  Wait for executable confirmation before sizing a position.
                 </div>
-              ))}
-              <div style={{ borderTop:`1px solid ${T.border}`, paddingTop: 8, fontSize: 10, color: T.sub }}>
-                R:R 1:{(Math.abs(result.tp1Num - result.price) / Math.abs(result.price - result.slNum)).toFixed(1)} / 1:{(Math.abs(result.tp2Num - result.price) / Math.abs(result.price - result.slNum)).toFixed(1)}
-              </div>
+              )}
             </div>
           </div>
 
@@ -4932,29 +5025,31 @@ function SignalsWorkspace({ onNavigate }) {
           {/* Compliance */}
           <div style={{
             padding: '10px 14px', borderRadius: 8, marginBottom: 14,
-            background: result.compliance === 'WARNING' ? 'rgba(239,68,68,0.07)' : 'rgba(16,185,129,0.06)',
-            border: `1px solid ${result.compliance === 'WARNING' ? 'rgba(239,68,68,0.18)' : 'rgba(16,185,129,0.14)'}`,
-            fontSize: 12, color: result.compliance === 'WARNING' ? T.red : '#34D399',
+            background: !tradeExecutable ? 'rgba(245,158,11,0.07)' : result.compliance === 'WARNING' ? 'rgba(239,68,68,0.07)' : 'rgba(16,185,129,0.06)',
+            border: `1px solid ${!tradeExecutable ? 'rgba(245,158,11,0.18)' : result.compliance === 'WARNING' ? 'rgba(239,68,68,0.18)' : 'rgba(16,185,129,0.14)'}`,
+            fontSize: 12, color: !tradeExecutable ? T.amber : result.compliance === 'WARNING' ? T.red : '#34D399',
           }}>
-            {result.compliance === 'WARNING' ? '⚠️' : '✅'} {result.compNote}
+            {!tradeExecutable ? '⏸ Setup not executable yet.' : result.compliance === 'WARNING' ? '⚠️' : '✅'} {tradeExecutable ? result.compNote : (algoBlocksTrade ? `Algo verdict: ${algoSignal.verdict}.` : result.invalidation)}
           </div>
 
           {/* PosSizer + Journal */}
           <div style={{ display:'flex', gap: 12, flexWrap:'wrap' }}>
-            <PosSizer
-              symbol={sym}
-              entry={result.price}
-              sl={result.slNum}
-              tp1={result.tp1Num}
-              tp2={result.tp2Num}
-              accountBalance={100000}
-            />
+            {tradeExecutable && (
+              <PosSizer
+                symbol={sym}
+                entry={result.price}
+                sl={result.slNum}
+                tp1={result.tp1Num}
+                tp2={result.tp2Num}
+                accountBalance={100000}
+              />
+            )}
             <SignalNote signalId={`manual_${sym}_${tf}`}/>
           </div>
 
           {/* ── Workflow actions ── */}
           <div style={{ display:'flex', gap:10, marginTop:14, flexWrap:'wrap' }}>
-            {onNavigate && (
+            {onNavigate && tradeExecutable && (
               <button onClick={() => {
                 LS.set('pendingSignal', {
                   sym,
@@ -5697,7 +5792,7 @@ function useCalendarWeek() {
       const data = await fetchCalendarAPI('?range=week');
       setAllEvents(data.events || []);
       setError(null);
-    } catch (e) {
+    } catch {
       setError('Failed to load calendar. Check your connection.');
     } finally {
       setLoading(false);
@@ -6215,10 +6310,10 @@ function OnboardingWizard({ user, onComplete, onNavigate }) {
               ))}
             </div>
             <button onClick={() => setStep(1)} style={{ width:'100%', padding:'14px 0', background:'linear-gradient(135deg,#6366F1,#4F46E5)', border:'none', borderRadius:12, color:'#fff', fontSize:15, fontWeight:800, cursor:'pointer' }}>
-              Let's set up your challenge →
+              Let&apos;s set up your challenge →
             </button>
             <button onClick={finish} style={{ marginTop:10, background:'transparent', border:'none', color:T.muted, fontSize:13, cursor:'pointer', textDecoration:'underline' }}>
-              Skip — I'll do this later
+              Skip — I&apos;ll do this later
             </button>
           </div>
         )}
@@ -6242,7 +6337,7 @@ function OnboardingWizard({ user, onComplete, onNavigate }) {
         {step === 2 && (
           <div style={{ textAlign:'center' }}>
             <div style={{ fontSize:56, marginBottom:16 }}>✅</div>
-            <div style={{ fontWeight:900, fontSize:24, marginBottom:10 }}>You're Ready!</div>
+            <div style={{ fontWeight:900, fontSize:24, marginBottom:10 }}>You&apos;re Ready!</div>
             <div style={{ color:T.sub, fontSize:14, lineHeight:1.8, marginBottom:32 }}>
               {setupDone ? 'Challenge configured and synced. ' : ''}
               Your command center is live. Start by running the Signal Engine to find your first trade setup.
@@ -6360,7 +6455,7 @@ function AuthScreen({ onAuth, onDemo }) {
 
         <div className="pp-auth-switch">
           {mode === 'login'
-            ? <>Don't have an account? <a onClick={() => { setMode('register'); setError(''); }}>Sign up free</a></>
+            ? <>Don&apos;t have an account? <a onClick={() => { setMode('register'); setError(''); }}>Sign up free</a></>
             : <>Already have an account? <a onClick={() => { setMode('login'); setError(''); }}>Sign in</a></>
           }
         </div>
@@ -6445,6 +6540,7 @@ function AuthGate({ children }) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function AlgoTradingTab({ user }) {
+  void user;
   const [acct,      setAcct]      = useState(null);
   const [positions, setPositions] = useState([]);
   const [loading,   setLoading]   = useState(true);
@@ -6469,7 +6565,10 @@ function AlgoTradingTab({ user }) {
       ]);
       if (acctRes.ok) { const d = await acctRes.json(); if (d) setAcct(d); }
       if (posRes.ok)  { const d = await posRes.json();  if (Array.isArray(d)) setPositions(d); }
-    } catch {}
+    } catch {
+      setAcct(null);
+      setPositions([]);
+    }
     setLoading(false);
   }, []);
 
@@ -6529,6 +6628,7 @@ function AlgoTradingTab({ user }) {
         body: JSON.stringify({
           autoTrade: true,
           demoTest,
+          paperFallback: true,
           symbols: ['XAU/USD', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'NAS100', 'BTC/USD'],
         }),
       });
@@ -6540,6 +6640,20 @@ function AlgoTradingTab({ user }) {
       }
       if (json.tradesOpened > 0) {
         showToast(demoTest ? '🧪 Demo paper trade opened' : '✅ Paper trade opened from model signal', 'success', 5000);
+      } else if (Array.isArray(json.tradeResults) && json.tradeResults.length > 0) {
+        const firstReject = json.tradeResults.find(r => !r.success) || json.tradeResults[0];
+        showToast(firstReject.error || 'Trade signal was rejected by risk filters', 'warn', 7000);
+      } else if ((json.actionable ?? 0) === 0) {
+        const best = Array.isArray(json.signals)
+          ? [...json.signals].sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0]
+          : null;
+        showToast(
+          best
+            ? `No executable signal. Best: ${best.symbol} ${best.verdict} ${best.confidence}%`
+            : 'No executable signal right now. Analysis saved.',
+          'info',
+          7000
+        );
       } else {
         showToast('No executable signal right now. Analysis saved.', 'info', 5000);
       }
@@ -6974,7 +7088,7 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
         }
       }
     })();
-  }, [user?.id]);
+  }, [user?.id, showToast]);
 
   // Subscribe Realtime for push notifications
   useEffect(() => {
@@ -7033,7 +7147,7 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
       };
     }
     return account;
-  }, [account, screen, trades]);
+  }, [account]);
 
   // Gate metrics — computed for Challenge tab's internal use
   const gateData = useMemo(() => {
@@ -7147,7 +7261,11 @@ const PushMgr = {
       requireInteraction: false,
       silent: false,
     });
-    n.onclick = () => { window.focus(); n.close(); };
+    n.onclick = () => {
+      window.focus();
+      if (url) window.location.href = url;
+      n.close();
+    };
     setTimeout(() => n.close(), 8000);
   },
 
