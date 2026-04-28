@@ -7570,16 +7570,17 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
     })();
   }, [user?.id, showToast]);
 
-  // Subscribe Realtime for push notifications
+  // Subscribe Realtime for push notifications — clean up on re-run/unmount
   useEffect(() => {
     if (!sbClient || !pushMgr) return;
-    pushMgr.subscribeOutcomes(sbClient, (s, isWin) => {
+    const unsub = pushMgr.subscribeOutcomes(sbClient, (s, isWin) => {
       showToast(
         `${isWin ? '✅' : '❌'} ${s.symbol} — ${s.outcome?.replace('_',' ')} ${s.pnl_r != null ? (s.pnl_r > 0 ? '+' : '') + s.pnl_r.toFixed(2) + 'R' : ''}`,
         isWin ? 'success' : 'error', 7000
       );
     });
-  }, [pushMgr, showToast]);
+    return unsub;
+  }, [sbClient, pushMgr]);
 
   useEffect(() => { LS.set('screen', screen); }, [screen]);
   useEffect(() => { LS.set('phase', phase); }, [phase]);
@@ -7751,9 +7752,12 @@ const PushMgr = {
   },
 
   // Subscribe to Supabase Realtime for outcome changes
+  // Returns an unsubscribe function so the caller can clean up
   subscribeOutcomes(sbClient, onOutcome) {
-    if (!sbClient) return;
-    sbClient
+    if (!sbClient) return () => {};
+    // Remove any existing channel with the same name first
+    sbClient.removeChannel(sbClient.channel('outcome-notifs'));
+    const channel = sbClient
       .channel('outcome-notifs')
       .on('postgres_changes', {
         event: 'UPDATE',
@@ -7770,6 +7774,7 @@ const PushMgr = {
         if (onOutcome) onOutcome(s, isWin);
       })
       .subscribe();
+    return () => sbClient.removeChannel(channel);
   },
 };
 
