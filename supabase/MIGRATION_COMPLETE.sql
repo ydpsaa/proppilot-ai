@@ -407,6 +407,7 @@ END;
 $$;
 
 -- ── 12. Views ─────────────────────────────────────────────────────────────────
+DROP VIEW IF EXISTS v_latest_signals CASCADE;
 CREATE OR REPLACE VIEW v_latest_signals AS
 SELECT DISTINCT ON (symbol)
   id, created_at, symbol, timeframe, verdict, confidence,
@@ -415,6 +416,7 @@ SELECT DISTINCT ON (symbol)
   mss_occurred, displacement, data_status, ai_narrative
 FROM smc_signals ORDER BY symbol, created_at DESC;
 
+DROP VIEW IF EXISTS v_bot_dashboard CASCADE;
 CREATE OR REPLACE VIEW v_bot_dashboard AS
 SELECT
   a.balance, a.equity, a.open_pnl, a.daily_pnl_usd,
@@ -578,6 +580,7 @@ DROP POLICY IF EXISTS "Public read strategy_stats" ON public.strategy_stats;
 CREATE POLICY "Public read strategy_stats"
   ON public.strategy_stats FOR SELECT USING (true);
 
+DROP VIEW IF EXISTS public.v_analytics_signals CASCADE;
 CREATE OR REPLACE VIEW public.v_analytics_signals AS
 SELECT
   id,
@@ -956,6 +959,7 @@ CREATE POLICY "Public read symbol_config"
 -- ── 5. Utility Views ──────────────────────────────────────────────────────────
 
 -- Latest signal per symbol (for dashboard)
+DROP VIEW IF EXISTS v_latest_signals CASCADE;
 CREATE OR REPLACE VIEW v_latest_signals AS
 SELECT DISTINCT ON (symbol)
   id, created_at, symbol, timeframe, verdict, confidence,
@@ -969,6 +973,7 @@ COMMENT ON VIEW v_latest_signals IS
   'Latest analysis result per symbol — used by the dashboard for at-a-glance status.';
 
 -- Signal performance stats per symbol
+DROP VIEW IF EXISTS v_signal_stats CASCADE;
 CREATE OR REPLACE VIEW v_signal_stats AS
 SELECT
   symbol,
@@ -1303,6 +1308,7 @@ $$;
 -- ── 8. Views for bot.html ─────────────────────────────────────────────────────
 
 -- Dashboard summary view
+DROP VIEW IF EXISTS v_bot_dashboard CASCADE;
 CREATE OR REPLACE VIEW v_bot_dashboard AS
 SELECT
   a.balance,
@@ -1843,6 +1849,7 @@ COMMENT ON COLUMN smc_signals.strategy_votes IS 'Weighted ensemble votes and ada
 
 -- ── 2. v_signal_performance — win rate + R stats per symbol ──────────────────
 
+DROP VIEW IF EXISTS v_signal_performance CASCADE;
 CREATE OR REPLACE VIEW v_signal_performance AS
 WITH settled AS (
   SELECT
@@ -1909,6 +1916,7 @@ COMMENT ON VIEW v_signal_performance IS
 
 -- ── 3. v_session_edge — performance by trading session ───────────────────────
 
+DROP VIEW IF EXISTS v_session_edge CASCADE;
 CREATE OR REPLACE VIEW v_session_edge AS
 SELECT
   COALESCE(session_name, 'Unknown')                        AS session,
@@ -1942,6 +1950,7 @@ COMMENT ON VIEW v_session_edge IS
 -- Unnests reasoning_codes array so each factor can be scored independently.
 -- E.g. "does SWEEP_HIGH_QUALITY actually improve win rate vs SWEEP_MED_QUALITY?"
 
+DROP VIEW IF EXISTS v_factor_edge CASCADE;
 CREATE OR REPLACE VIEW v_factor_edge AS
 WITH exploded AS (
   SELECT
@@ -1981,6 +1990,7 @@ COMMENT ON VIEW v_factor_edge IS
 
 -- ── 5. v_confidence_buckets — does higher confidence → higher win rate? ───────
 
+DROP VIEW IF EXISTS v_confidence_buckets CASCADE;
 CREATE OR REPLACE VIEW v_confidence_buckets AS
 SELECT
   CASE
@@ -2012,6 +2022,7 @@ COMMENT ON VIEW v_confidence_buckets IS
 
 -- ── 6. v_monthly_equity — month-over-month equity curve ──────────────────────
 
+DROP VIEW IF EXISTS v_monthly_equity CASCADE;
 CREATE OR REPLACE VIEW v_monthly_equity AS
 SELECT
   DATE_TRUNC('month', created_at)                          AS month,
@@ -2036,6 +2047,7 @@ COMMENT ON VIEW v_monthly_equity IS
 
 -- ── 7. v_sweep_quality_edge — does better sweep quality → better outcome? ─────
 
+DROP VIEW IF EXISTS v_sweep_quality_edge CASCADE;
 CREATE OR REPLACE VIEW v_sweep_quality_edge AS
 SELECT
   CASE
@@ -2069,6 +2081,7 @@ COMMENT ON VIEW v_sweep_quality_edge IS
 
 -- ── 8. v_mss_type_edge — sweep-based MSS vs pure structural break ─────────────
 
+DROP VIEW IF EXISTS v_mss_type_edge CASCADE;
 CREATE OR REPLACE VIEW v_mss_type_edge AS
 SELECT
   CASE
@@ -2103,6 +2116,7 @@ COMMENT ON VIEW v_mss_type_edge IS
 
 -- ── 9. v_open_signals — signals awaiting outcome (outcome_tracker input) ──────
 
+DROP VIEW IF EXISTS v_open_signals CASCADE;
 CREATE OR REPLACE VIEW v_open_signals AS
 SELECT
   id,
@@ -2610,6 +2624,7 @@ $$;
 -- ─── Views ────────────────────────────────────────────────────────────────
 
 -- Общая производительность по символу и сессии
+DROP VIEW IF EXISTS v_journal_performance CASCADE;
 CREATE OR REPLACE VIEW v_journal_performance AS
 SELECT
     symbol,
@@ -2636,6 +2651,7 @@ ORDER BY total_r DESC;
 
 
 -- Психология и результат
+DROP VIEW IF EXISTS v_journal_psychology CASCADE;
 CREATE OR REPLACE VIEW v_journal_psychology AS
 SELECT
     CASE
@@ -2657,6 +2673,7 @@ ORDER BY avg_r DESC;
 
 
 -- Топ ошибок трейдера (по частоте и влиянию на P&L)
+DROP VIEW IF EXISTS v_journal_mistakes CASCADE;
 CREATE OR REPLACE VIEW v_journal_mistakes AS
 SELECT
     mistake,
@@ -2673,6 +2690,7 @@ ORDER BY total_r_impact ASC;   -- наихудшие ошибки вверху
 
 
 -- Лучшие паттерны трейдера (для генерации персональных сигналов)
+DROP VIEW IF EXISTS v_journal_patterns CASCADE;
 CREATE OR REPLACE VIEW v_journal_patterns AS
 SELECT
     jp.*,
@@ -2687,6 +2705,7 @@ ORDER BY avg_r DESC;
 
 
 -- Персональные сигналы на основе паттернов трейдера
+DROP VIEW IF EXISTS v_journal_signals CASCADE;
 CREATE OR REPLACE VIEW v_journal_signals AS
 SELECT
     symbol,
@@ -2710,6 +2729,7 @@ ORDER BY expectancy_r DESC;
 
 
 -- Недельный прогресс (по неделям)
+DROP VIEW IF EXISTS v_journal_weekly CASCADE;
 CREATE OR REPLACE VIEW v_journal_weekly AS
 SELECT
     DATE_TRUNC('week', entry_time)::DATE                                AS week_start,
@@ -2931,6 +2951,7 @@ CREATE INDEX IF NOT EXISTS idx_prop_violations_challenge
 -- VIEW: v_prop_challenge_status
 -- Live challenge health snapshot — one row per active challenge
 -- ─────────────────────────────────────────────────────────────────────────────
+DROP VIEW IF EXISTS v_prop_challenge_status CASCADE;
 CREATE OR REPLACE VIEW v_prop_challenge_status AS
 SELECT
     c.id                                                    AS challenge_id,
@@ -3002,6 +3023,7 @@ ORDER BY c.account_id, c.id;
 -- VIEW: v_prop_daily_equity
 -- Day-by-day equity curve for charting
 -- ─────────────────────────────────────────────────────────────────────────────
+DROP VIEW IF EXISTS v_prop_daily_equity CASCADE;
 CREATE OR REPLACE VIEW v_prop_daily_equity AS
 SELECT
     d.challenge_id,
@@ -3030,6 +3052,7 @@ ORDER BY d.challenge_id, d.trade_date;
 -- VIEW: v_prop_session_breakdown
 -- Performance split by trading session for pattern analysis
 -- ─────────────────────────────────────────────────────────────────────────────
+DROP VIEW IF EXISTS v_prop_session_breakdown CASCADE;
 CREATE OR REPLACE VIEW v_prop_session_breakdown AS
 SELECT
     challenge_id,
@@ -3358,6 +3381,7 @@ $$;
 -- ─── Views ────────────────────────────────────────────────────────────────
 
 -- Best backtest runs per symbol, ranked by Sharpe ratio
+DROP VIEW IF EXISTS v_backtest_summary CASCADE;
 CREATE OR REPLACE VIEW v_backtest_summary AS
 SELECT
     id,
@@ -3382,6 +3406,7 @@ ORDER BY sharpe DESC NULLS LAST;
 
 
 -- Session-level edge aggregated across all backtest trades
+DROP VIEW IF EXISTS v_backtest_session_edge CASCADE;
 CREATE OR REPLACE VIEW v_backtest_session_edge AS
 SELECT
     t.session,
@@ -3406,6 +3431,7 @@ ORDER BY t.symbol, avg_r DESC;
 
 
 -- Exit reason breakdown (what % of trades hit TP1 vs SL vs TP2 etc.)
+DROP VIEW IF EXISTS v_backtest_exit_reasons CASCADE;
 CREATE OR REPLACE VIEW v_backtest_exit_reasons AS
 SELECT
     r.symbol,
@@ -3420,6 +3446,7 @@ ORDER BY r.symbol, count DESC;
 
 
 -- Confidence bucket analysis: does higher confidence = better trades?
+DROP VIEW IF EXISTS v_backtest_confidence_edge CASCADE;
 CREATE OR REPLACE VIEW v_backtest_confidence_edge AS
 SELECT
     r.symbol,
@@ -3440,6 +3467,7 @@ ORDER BY r.symbol, confidence_bucket DESC;
 
 
 -- Market regime performance
+DROP VIEW IF EXISTS v_backtest_regime_edge CASCADE;
 CREATE OR REPLACE VIEW v_backtest_regime_edge AS
 SELECT
     r.symbol,
