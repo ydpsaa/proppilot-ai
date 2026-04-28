@@ -18,6 +18,14 @@
 --   • Prop firm challenge tracker
 --   • Backtest storage
 -- ═══════════════════════════════════════════════════════════════════════════
+-- ╔═══════════════════════════════════════════════════════════════════════════╗
+-- ║  NOTE: pg_cron jobs have been removed from this file.                   ║
+-- ║  To set up scheduled jobs after migration:                              ║
+-- ║  1. Enable pg_cron: Dashboard → Database → Extensions → pg_cron        ║
+-- ║  2. Run: supabase/CRON_JOBS.sql  (separate file)                       ║
+-- ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
 
 
 
@@ -51,8 +59,8 @@
 
 -- ── EXTENSIONS ───────────────────────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
+-- Enable in Supabase Dashboard → Database → Extensions (pg_cron / pg_net)
+-- Enable in Supabase Dashboard → Database → Extensions (pg_cron / pg_net)
 
 -- ── 1. paper_account ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS paper_account (
@@ -420,17 +428,17 @@ FROM paper_account a CROSS JOIN bot_settings s
 WHERE a.id = 1 AND s.id = 1;
 
 -- ── 13. pg_cron schedules ────────────────────────────────────────────────────
-SELECT cron.schedule('daily-reset-tracking', '1 0 * * *', $$SELECT reset_daily_tracking()$$);
+-- SELECT cron.schedule('daily-reset-tracking', '1 0 * * *', $$SELECT reset_daily_tracking()$$);
 
--- ═══════════════════════════════════════════════════════════════════════════
--- DONE. Все таблицы созданы и готовы к работе.
--- ═══════════════════════════════════════════════════════════════════════════
+-- -- ═══════════════════════════════════════════════════════════════════════════
+-- -- DONE. Все таблицы созданы и готовы к работе.
+-- -- ═══════════════════════════════════════════════════════════════════════════
 
--- ═══ PHASE 1: Outcome tracker + signal_analyses + strategy_stats ═══
--- PropPilot AI - Phase 1 outcome tracker and analytics.
+-- -- ═══ PHASE 1: Outcome tracker + signal_analyses + strategy_stats ═══
+-- -- PropPilot AI - Phase 1 outcome tracker and analytics.
 
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
+-- CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- Enable in Supabase Dashboard → Database → Extensions (pg_cron / pg_net)
 
 CREATE OR REPLACE FUNCTION public.set_updated_at()
 RETURNS trigger
@@ -697,43 +705,43 @@ WHERE NOT EXISTS (
     AND a.signal_state = s.verdict
 );
 
-DO $$
-DECLARE
-  r record;
-BEGIN
-  FOR r IN
-    SELECT jobid
-    FROM cron.job
-    WHERE jobname IN ('update-outcomes-hourly', 'update-strategy-stats-daily')
-  LOOP
-    PERFORM cron.unschedule(r.jobid);
-  END LOOP;
-END;
-$$;
+-- DO $$
+-- DECLARE
+--   r record;
+-- BEGIN
+--   FOR r IN
+--     SELECT jobid
+--     FROM cron.job
+--     WHERE jobname IN ('update-outcomes-hourly', 'update-strategy-stats-daily')
+--   LOOP
+--     PERFORM cron.unschedule(r.jobid);
+--   END LOOP;
+-- END;
+-- $$;
 
-SELECT cron.schedule(
-  'update-outcomes-hourly',
-  '5 * * * *',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-outcomes',
-      headers := '{"Content-Type":"application/json"}'::jsonb,
-      body := '{"source":"pg_cron"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'update-outcomes-hourly',
+--   '5 * * * *',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-outcomes',
+--       headers := '{"Content-Type":"application/json"}'::jsonb,
+--       body := '{"source":"pg_cron"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'update-strategy-stats-daily',
-  '10 0 * * *',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-strategy-stats',
-      headers := '{"Content-Type":"application/json"}'::jsonb,
-      body := '{"source":"pg_cron"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'update-strategy-stats-daily',
+--   '10 0 * * *',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-strategy-stats',
+--       headers := '{"Content-Type":"application/json"}'::jsonb,
+--       body := '{"source":"pg_cron"}'::jsonb
+--     );
+--   $$
+-- );
 
 -- ═══ PHASE 2: SMC engine ═══
 -- ═══════════════════════════════════════════════════════════════════════════════
@@ -1561,161 +1569,161 @@ CREATE POLICY "Authenticated insert execution_log"
 -- The ALTER DATABASE line persists the setting for future cron runs. The
 -- set_config line makes it available immediately in the current SQL session.
 
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-CREATE EXTENSION IF NOT EXISTS pg_net;
+-- Enable in Supabase Dashboard → Database → Extensions (pg_cron / pg_net)
+-- Enable in Supabase Dashboard → Database → Extensions (pg_cron / pg_net)
 
 -- (Cron secret check skipped — set via `supabase secrets set PROPILOT_CRON_SECRET=...`)
 
-DO $$
-DECLARE
-  r record;
-BEGIN
-  FOR r IN
-    SELECT jobid
-    FROM cron.job
-    WHERE jobname IN (
-      'auto-analyze-london',
-      'auto-analyze-overlap',
-      'auto-analyze-newyork',
-      'auto-analyze-asia',
-      'auto-analyze-frankfurt',
-      'update-outcomes-hourly',
-      'update-strategy-stats-daily',
-      'update-stats-daily',
-      'update-positions-5min',
-      'daily-reset-tracking'
-    )
-  LOOP
-    PERFORM cron.unschedule(r.jobid);
-  END LOOP;
-END;
-$$;
+-- DO $$
+-- DECLARE
+--   r record;
+-- BEGIN
+--   FOR r IN
+--     SELECT jobid
+--     FROM cron.job
+--     WHERE jobname IN (
+--       'auto-analyze-london',
+--       'auto-analyze-overlap',
+--       'auto-analyze-newyork',
+--       'auto-analyze-asia',
+--       'auto-analyze-frankfurt',
+--       'update-outcomes-hourly',
+--       'update-strategy-stats-daily',
+--       'update-stats-daily',
+--       'update-positions-5min',
+--       'daily-reset-tracking'
+--     )
+--   LOOP
+--     PERFORM cron.unschedule(r.jobid);
+--   END LOOP;
+-- END;
+-- $$;
 
-SELECT cron.schedule(
-  'auto-analyze-asia',
-  '0 0 * * 1-5',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      ),
-      body := '{"source":"pg_cron","session":"asia"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'auto-analyze-asia',
+--   '0 0 * * 1-5',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       ),
+--       body := '{"source":"pg_cron","session":"asia"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'auto-analyze-frankfurt',
-  '0 7 * * 1-5',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      ),
-      body := '{"source":"pg_cron","session":"frankfurt"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'auto-analyze-frankfurt',
+--   '0 7 * * 1-5',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       ),
+--       body := '{"source":"pg_cron","session":"frankfurt"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'auto-analyze-london',
-  '0 8 * * 1-5',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      ),
-      body := '{"source":"pg_cron","session":"london"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'auto-analyze-london',
+--   '0 8 * * 1-5',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       ),
+--       body := '{"source":"pg_cron","session":"london"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'auto-analyze-overlap',
-  '0 12 * * 1-5',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      ),
-      body := '{"source":"pg_cron","session":"overlap"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'auto-analyze-overlap',
+--   '0 12 * * 1-5',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       ),
+--       body := '{"source":"pg_cron","session":"overlap"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'auto-analyze-newyork',
-  '0 17 * * 1-5',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      ),
-      body := '{"source":"pg_cron","session":"newyork"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'auto-analyze-newyork',
+--   '0 17 * * 1-5',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/auto-analyze',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       ),
+--       body := '{"source":"pg_cron","session":"newyork"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'update-positions-5min',
-  '*/5 * * * *',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-paper-positions',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      ),
-      body := '{"source":"pg_cron"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'update-positions-5min',
+--   '*/5 * * * *',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-paper-positions',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       ),
+--       body := '{"source":"pg_cron"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'update-outcomes-hourly',
-  '5 * * * *',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-outcomes',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      ),
-      body := '{"source":"pg_cron"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'update-outcomes-hourly',
+--   '5 * * * *',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-outcomes',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       ),
+--       body := '{"source":"pg_cron"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'update-strategy-stats-daily',
-  '10 0 * * *',
-  $$
-    SELECT net.http_post(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-strategy-stats',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      ),
-      body := '{"source":"pg_cron"}'::jsonb
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'update-strategy-stats-daily',
+--   '10 0 * * *',
+--   $$
+--     SELECT net.http_post(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/update-strategy-stats',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       ),
+--       body := '{"source":"pg_cron"}'::jsonb
+--     );
+--   $$
+-- );
 
-SELECT cron.schedule(
-  'daily-reset-tracking',
-  '1 0 * * *',
-  $$SELECT reset_daily_tracking()$$
-);
+-- SELECT cron.schedule(
+--   'daily-reset-tracking',
+--   '1 0 * * *',
+--   $$SELECT reset_daily_tracking()$$
+-- );
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- ForexFactory Economic Calendar Cache (added 2026-04-27)
@@ -1765,28 +1773,28 @@ CREATE POLICY "Public read economic_events"
   ON public.economic_events FOR SELECT USING (true);
 
 -- ── pg_cron: refresh calendar every 30 min on weekdays ───────────────────
-DO $$
-DECLARE r record;
-BEGIN
-  FOR r IN SELECT jobid FROM cron.job WHERE jobname = 'refresh-calendar' LOOP
-    PERFORM cron.unschedule(r.jobid);
-  END LOOP;
-END;
-$$;
+-- DO $$
+-- DECLARE r record;
+-- BEGIN
+--   FOR r IN SELECT jobid FROM cron.job WHERE jobname = 'refresh-calendar' LOOP
+--     PERFORM cron.unschedule(r.jobid);
+--   END LOOP;
+-- END;
+-- $$;
 
-SELECT cron.schedule(
-  'refresh-calendar',
-  '*/30 6-22 * * 1-5',
-  $$
-    SELECT net.http_get(
-      url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/calendar?refresh=true',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
-      )
-    );
-  $$
-);
+-- SELECT cron.schedule(
+--   'refresh-calendar',
+--   '*/30 6-22 * * 1-5',
+--   $$
+--     SELECT net.http_get(
+--       url := 'https://nxiednydxyrtxpkmgtof.supabase.co/functions/v1/calendar?refresh=true',
+--       headers := jsonb_build_object(
+--         'Content-Type', 'application/json',
+--         'x-proppilot-cron-secret', 'b02104dfbd7cc87ddb2f2b561aa9863050063f77b586810e3d6cb8a503e7e0b2'
+--       )
+--     );
+--   $$
+-- );
 
 
 -- ╔═══════════════════════════════════════════════════════════════════════════╗
