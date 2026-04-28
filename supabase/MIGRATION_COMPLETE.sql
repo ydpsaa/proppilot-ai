@@ -2122,7 +2122,11 @@ SELECT
   id,
   created_at,
   symbol,
-  direction,
+  CASE
+    WHEN verdict IN ('LONG_NOW','WAIT_LONG')   THEN 'LONG'
+    WHEN verdict IN ('SHORT_NOW','WAIT_SHORT') THEN 'SHORT'
+    ELSE NULL
+  END                                          AS direction,
   verdict,
   confidence,
   entry_price,
