@@ -1494,71 +1494,84 @@ DROP POLICY IF EXISTS "anon_insert_execution_log" ON public.execution_log;
 
 -- Authenticated users can mutate MVP singleton resources. Service-role Edge
 -- Functions bypass RLS and remain the preferred path for automated trading.
+DROP POLICY IF EXISTS "Authenticated update paper_account" ON public.paper_account;
 CREATE POLICY "Authenticated update paper_account"
   ON public.paper_account FOR UPDATE
   TO authenticated
   USING (true)
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated insert paper_positions" ON public.paper_positions;
 CREATE POLICY "Authenticated insert paper_positions"
   ON public.paper_positions FOR INSERT
   TO authenticated
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated update paper_positions" ON public.paper_positions;
 CREATE POLICY "Authenticated update paper_positions"
   ON public.paper_positions FOR UPDATE
   TO authenticated
   USING (true)
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated update bot_settings" ON public.bot_settings;
 CREATE POLICY "Authenticated update bot_settings"
   ON public.bot_settings FOR UPDATE
   TO authenticated
   USING (true)
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated insert bot_memory" ON public.bot_memory;
 CREATE POLICY "Authenticated insert bot_memory"
   ON public.bot_memory FOR INSERT
   TO authenticated
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated insert smc_signals" ON public.smc_signals;
 CREATE POLICY "Authenticated insert smc_signals"
   ON public.smc_signals FOR INSERT
   TO authenticated
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated update smc_signals" ON public.smc_signals;
 CREATE POLICY "Authenticated update smc_signals"
   ON public.smc_signals FOR UPDATE
   TO authenticated
   USING (true)
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated insert market_levels" ON public.market_levels;
 CREATE POLICY "Authenticated insert market_levels"
   ON public.market_levels FOR INSERT
   TO authenticated
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated insert signal_analyses" ON public.signal_analyses;
 CREATE POLICY "Authenticated insert signal_analyses"
   ON public.signal_analyses FOR INSERT
   TO authenticated
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated update signal_analyses" ON public.signal_analyses;
 CREATE POLICY "Authenticated update signal_analyses"
   ON public.signal_analyses FOR UPDATE
   TO authenticated
   USING (true)
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated insert strategy_stats" ON public.strategy_stats;
 CREATE POLICY "Authenticated insert strategy_stats"
   ON public.strategy_stats FOR INSERT
   TO authenticated
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated insert equity_snapshots" ON public.equity_snapshots;
 CREATE POLICY "Authenticated insert equity_snapshots"
   ON public.equity_snapshots FOR INSERT
   TO authenticated
   WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Authenticated insert execution_log" ON public.execution_log;
 CREATE POLICY "Authenticated insert execution_log"
   ON public.execution_log FOR INSERT
   TO authenticated
@@ -2763,12 +2776,15 @@ ALTER TABLE journal_analyses  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE journal_patterns  ENABLE ROW LEVEL SECURITY;
 
 -- Service role (daemon + API) имеет полный доступ
+DROP POLICY IF EXISTS "service_all_journal_trades" ON journal_trades;
 CREATE POLICY "service_all_journal_trades"
     ON journal_trades FOR ALL USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "service_all_journal_analyses" ON journal_analyses;
 CREATE POLICY "service_all_journal_analyses"
     ON journal_analyses FOR ALL USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "service_all_journal_patterns" ON journal_patterns;
 CREATE POLICY "service_all_journal_patterns"
     ON journal_patterns FOR ALL USING (auth.role() = 'service_role');
 
@@ -3497,14 +3513,17 @@ ALTER TABLE backtest_trades       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE backtest_equity_curve ENABLE ROW LEVEL SECURITY;
 
 -- Service role (daemon) has full access
+DROP POLICY IF EXISTS "service_role_all_backtest_runs" ON backtest_runs;
 CREATE POLICY "service_role_all_backtest_runs"
     ON backtest_runs FOR ALL
     USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "service_role_all_backtest_trades" ON backtest_trades;
 CREATE POLICY "service_role_all_backtest_trades"
     ON backtest_trades FOR ALL
     USING (auth.role() = 'service_role');
 
+DROP POLICY IF EXISTS "service_role_all_backtest_equity" ON backtest_equity_curve;
 CREATE POLICY "service_role_all_backtest_equity"
     ON backtest_equity_curve FOR ALL
     USING (auth.role() = 'service_role');
@@ -3521,6 +3540,7 @@ CREATE POLICY "Authenticated read journal_trades"
     ON journal_trades FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Authenticated insert journal_trades"
     ON journal_trades FOR INSERT TO authenticated WITH CHECK (true);
+DROP POLICY IF EXISTS "Authenticated update journal_trades" ON journal_trades;
 CREATE POLICY "Authenticated update journal_trades"
     ON journal_trades FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
 
