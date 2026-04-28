@@ -529,6 +529,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_signal_analyses_source_unique
   ON public.signal_analyses (created_at, symbol, timeframe, signal_state);
 
 DROP TRIGGER IF EXISTS trg_signal_analyses_updated_at ON public.signal_analyses;
+DROP TRIGGER IF EXISTS trg_signal_analyses_updated_at ON public.signal_analyses;
 CREATE TRIGGER trg_signal_analyses_updated_at
 BEFORE UPDATE ON public.signal_analyses
 FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
@@ -1406,6 +1407,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
@@ -2408,6 +2410,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS journal_trades_updated_at ON journal_trades;
 CREATE TRIGGER journal_trades_updated_at
     BEFORE UPDATE ON journal_trades
     FOR EACH ROW EXECUTE FUNCTION journal_update_ts();
@@ -2858,6 +2861,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_prop_challenge_ts ON prop_challenges;
 DROP TRIGGER IF EXISTS trg_prop_challenge_ts ON prop_challenges;
 CREATE TRIGGER trg_prop_challenge_ts
     BEFORE UPDATE ON prop_challenges
