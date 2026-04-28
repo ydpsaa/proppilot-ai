@@ -2013,7 +2013,7 @@ SELECT
   ROUND(AVG(outcome_pnl_r) FILTER (WHERE outcome_pnl_r IS NOT NULL), 3) AS avg_pnl_r
 FROM smc_signals
 WHERE verdict IN ('LONG_NOW','SHORT_NOW')
-GROUP BY confidence_bucket
+GROUP BY 1  -- confidence CASE expression
 ORDER BY MIN(confidence);
 
 COMMENT ON VIEW v_confidence_buckets IS
@@ -2072,7 +2072,7 @@ SELECT
 FROM smc_signals
 WHERE verdict IN ('LONG_NOW','SHORT_NOW')
   AND outcome IS NOT NULL AND outcome != 'expired'
-GROUP BY quality_tier
+GROUP BY 1  -- sweep_quality CASE expression
 ORDER BY MIN(COALESCE(sweep_quality, -1)) DESC;
 
 COMMENT ON VIEW v_sweep_quality_edge IS
@@ -2107,7 +2107,7 @@ SELECT
 FROM smc_signals
 WHERE verdict IN ('LONG_NOW','SHORT_NOW')
   AND outcome IS NOT NULL AND outcome != 'expired'
-GROUP BY mss_type
+GROUP BY 1  -- mss_kind CASE expression
 ORDER BY profit_factor DESC NULLS LAST;
 
 COMMENT ON VIEW v_mss_type_edge IS
@@ -2668,7 +2668,7 @@ SELECT
     SUM(CASE WHEN followed_plan = FALSE THEN 1 ELSE 0 END)             AS off_plan_count
 FROM journal_trades
 WHERE mindset_score IS NOT NULL AND outcome IS NOT NULL
-GROUP BY mindset_bucket
+GROUP BY 1  -- mindset_score CASE expression
 ORDER BY avg_r DESC;
 
 
