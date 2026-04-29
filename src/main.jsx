@@ -5736,21 +5736,8 @@ function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState
           </div>
         </div>
 
-        {/* Center: phase pills + context chip */}
+        {/* Center: account chip + context chip */}
         <div style={{ display:'flex', alignItems:'center', gap:8, flex:1, justifyContent:'center', flexWrap:'wrap', overflow:'hidden' }}>
-
-          {/* Phase pills */}
-          <div style={{ display:'flex', alignItems:'center', gap:2, background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.06)', borderRadius:9, padding:'2px 3px', flexShrink:0 }}>
-            {Object.entries(PHASES).map(([id, p]) => (
-              <button key={id} onClick={() => onPhaseChange?.(id)} title={p.label} style={{
-                padding:'3px 8px', border:'none', borderRadius:7, cursor:'pointer', fontWeight:800,
-                fontSize:10, letterSpacing:'.04em', transition:'all .15s',
-                background: phase === id ? `${phColors[id]}25` : 'transparent',
-                color: phase === id ? phColors[id] : T.muted,
-                outline: phase === id ? `1px solid ${phColors[id]}50` : 'none',
-              }}>{p.tag}</button>
-            ))}
-          </div>
 
           {/* Account chip */}
           <div className="pp-status-pill" style={{ gap:5, flexShrink:0 }}>
