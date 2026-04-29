@@ -939,7 +939,7 @@ function fmtPrice(key, price) {
 // SETUP MODAL
 // ═══════════════════════════════════════════════════════════════════════════
 
-function SetupModal({ account, setAccount, onClose }) {
+function SetupModal({ account, setAccount, onClose, userId }) {
   const [loc, setLoc] = useState({ ...account });
   const FIRMS = ['FTMO','MyFundedFx','The5ers','FundedNext','E8 Markets','True Forex Funds'];
   const SIZES = [10000,25000,50000,100000,200000];
@@ -980,7 +980,20 @@ function SetupModal({ account, setAccount, onClose }) {
         </div>
         <div style={{ display:'flex', gap:12 }}>
           <button onClick={onClose} style={{ flex:1, padding:12, background:'rgba(255,255,255,0.05)', border:`1px solid ${T.border}`, borderRadius:10, color:T.sub, fontSize:14, fontWeight:600, cursor:'pointer' }}>Cancel</button>
-          <button onClick={() => { setAccount(loc); onClose(); }} style={{ flex:2, padding:12, background:`linear-gradient(135deg,${T.amber},#C96000)`, border:'none', borderRadius:10, color:'#000', fontSize:14, fontWeight:900, cursor:'pointer' }}>Save Account</button>
+          <button onClick={async () => {
+            setAccount(loc);
+            // Sync to Supabase accounts.settings
+            if (userId) {
+              try {
+                const sb = makeSupabase();
+                if (sb) await sb.from('accounts').update({
+                  settings: { firm: loc.firm, size: loc.size, currentPnL: loc.currentPnL, todayPnL: loc.todayPnL, tradingDays: loc.tradingDays },
+                  updated_at: new Date().toISOString(),
+                }).eq('auth_uid', userId);
+              } catch(e) { console.warn('Account sync failed:', e); }
+            }
+            onClose();
+          }} style={{ flex:2, padding:12, background:`linear-gradient(135deg,${T.amber},#C96000)`, border:'none', borderRadius:10, color:'#000', fontSize:14, fontWeight:900, cursor:'pointer' }}>Save Account</button>
         </div>
       </div>
     </div>
@@ -5686,8 +5699,8 @@ function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState
 
   const phColors = { s1:'#3B82F6', s2:'#8B5CF6', fs:'#10B981', sw:'#F59E0B' };
   const screenLabels = {
-    dashboard:'Today', signals:'Signals', analyze:'Analyze',
-    journal:'Journal', risk:'Risk Calc', analytics:'Analytics',
+    markets:'Today', dashboard:'Today', signals:'Signals', analyze:'Analyze',
+    backtest:'Backtest', journal:'Journal', risk:'Risk Calc', analytics:'Analytics',
     challenge:'Challenge', settings:'Settings',
   };
 
@@ -7172,7 +7185,7 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
           onNavigate={navigateTo}
         />
       )}
-      {showSetup && <SetupModal account={account} setAccount={handleSetAccount} onClose={() => setShowSetup(false)}/>}
+      {showSetup && <SetupModal account={account} setAccount={handleSetAccount} onClose={() => setShowSetup(false)} userId={user?.id}/>}
       <UnifiedAppHeader
         screen={screen}
         phase={phase}
