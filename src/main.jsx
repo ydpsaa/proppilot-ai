@@ -355,6 +355,7 @@ function localTradeToJournalPayload(trade) {
     mistakes: issue ? [issue] : null,
     followed_plan: trade.followed_plan ?? null,
     impulsive: Boolean(trade.impulsive),
+    screenshot_url: trade.screenshot_url || null,
   };
 }
 
@@ -378,6 +379,7 @@ function journalRowToLocalTrade(row) {
     session: row.session,
     strategy: row.strategy,
     source: row.source,
+    screenshot_url: row.screenshot_url || null,
     ai: row.ai_analyzed ? {
       verdict: row.ai_verdict,
       lesson: row.ai_key_lesson,
@@ -997,13 +999,58 @@ function LogTradeModal({ onClose, onSave }) {
   const [form, setForm] = useState({
     sym: 'XAUUSD', dir: 'LONG', pnl: '', rr: '', notes: '', date: dateStr, score: 75,
   });
+  const [screenshotFile, setScreenshotFile]     = useState(null);
+  const [screenshotPreview, setScreenshotPreview] = useState(null);
+  const [uploading, setUploading]               = useState(false);
+  const fileInputRef = useRef(null);
 
   const inp = { width:'100%', padding:'10px 12px', background:'rgba(255,255,255,0.06)', border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:14, outline:'none', boxSizing:'border-box' };
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
-  const handleSave = () => {
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScreenshotFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setScreenshotPreview(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    setScreenshotFile(file);
+    const reader = new FileReader();
+    reader.onloadend = () => setScreenshotPreview(reader.result);
+    reader.readAsDataURL(file);
+  };
+
+  const uploadScreenshot = async () => {
+    if (!screenshotFile || !sbClient) return null;
+    try {
+      const ext  = screenshotFile.name.split('.').pop() || 'png';
+      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error } = await sbClient.storage
+        .from('trade-screenshots')
+        .upload(path, screenshotFile, { contentType: screenshotFile.type, upsert: false });
+      if (error) { console.warn('[screenshot] upload error:', error); return null; }
+      const { data: { publicUrl } } = sbClient.storage
+        .from('trade-screenshots')
+        .getPublicUrl(path);
+      return publicUrl;
+    } catch (e) {
+      console.warn('[screenshot] upload failed:', e);
+      return null;
+    }
+  };
+
+  const handleSave = async () => {
     const pnlNum = parseFloat(form.pnl);
     if (!form.pnl || isNaN(pnlNum)) { alert('Enter a P&L value'); return; }
+    setUploading(true);
+    const screenshot_url = await uploadScreenshot();
+    setUploading(false);
     const trade = {
       id: Date.now(),
       date: form.date || dateStr,
@@ -1014,6 +1061,7 @@ function LogTradeModal({ onClose, onSave }) {
       score: form.score,
       win: pnlNum > 0,
       issue: form.notes || null,
+      screenshot_url,
     };
     onSave(trade);
     onClose();
@@ -1021,7 +1069,7 @@ function LogTradeModal({ onClose, onSave }) {
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.8)', zIndex:300, display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
-      <div className="pp-modal-inner" style={{ ...card, width:480, background:'rgba(5,7,15,0.92)', border:'1px solid rgba(52,211,153,0.3)' }} onClick={e => e.stopPropagation()}>
+      <div className="pp-modal-inner" style={{ ...card, width:480, maxHeight:'90vh', overflowY:'auto', background:'rgba(5,7,15,0.92)', border:'1px solid rgba(52,211,153,0.3)' }} onClick={e => e.stopPropagation()}>
         <div style={{ fontWeight:900, fontSize:18, marginBottom:4 }}>Log Trade</div>
         <div style={{ color:T.muted, fontSize:13, marginBottom:24 }}>Record a completed trade for your journal.</div>
 
@@ -1086,15 +1134,55 @@ function LogTradeModal({ onClose, onSave }) {
         </div>
 
         {/* Notes */}
-        <div style={{ marginBottom:24 }}>
+        <div style={{ marginBottom:18 }}>
           <div style={{ color:T.muted, fontSize:11, marginBottom:8, textTransform:'uppercase', letterSpacing:'0.09em' }}>Notes / Issues (optional)</div>
           <textarea value={form.notes} onChange={set('notes')} placeholder="e.g. FOMO entry, chased the move after breakout…" rows={3}
             style={{ ...inp, resize:'vertical', lineHeight:1.6 }}/>
         </div>
 
+        {/* Screenshot Upload */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ color:T.muted, fontSize:11, marginBottom:8, textTransform:'uppercase', letterSpacing:'0.09em' }}>Chart Screenshot (optional)</div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display:'none' }}
+            onChange={handleFileChange}
+          />
+          {screenshotPreview ? (
+            <div style={{ position:'relative', borderRadius:10, overflow:'hidden', border:`1px solid ${T.border}` }}>
+              <img
+                src={screenshotPreview}
+                alt="Trade screenshot"
+                style={{ width:'100%', maxHeight:200, objectFit:'cover', display:'block' }}
+              />
+              <button
+                onClick={() => { setScreenshotFile(null); setScreenshotPreview(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                style={{ position:'absolute', top:8, right:8, background:'rgba(0,0,0,0.7)', border:`1px solid ${T.border}`, borderRadius:6, color:T.text, padding:'4px 10px', cursor:'pointer', fontSize:12 }}
+              >✕ Remove</button>
+            </div>
+          ) : (
+            <div
+              onDrop={handleDrop}
+              onDragOver={e => e.preventDefault()}
+              onClick={() => fileInputRef.current?.click()}
+              style={{ border:`2px dashed rgba(255,255,255,0.15)`, borderRadius:10, padding:'28px 16px', textAlign:'center', cursor:'pointer', transition:'border-color 0.2s', background:'rgba(255,255,255,0.02)' }}
+              onMouseEnter={e => e.currentTarget.style.borderColor='rgba(52,211,153,0.4)'}
+              onMouseLeave={e => e.currentTarget.style.borderColor='rgba(255,255,255,0.15)'}
+            >
+              <div style={{ fontSize:28, marginBottom:8 }}>📸</div>
+              <div style={{ color:T.sub, fontSize:13, fontWeight:600 }}>Drop chart screenshot here</div>
+              <div style={{ color:T.muted, fontSize:11, marginTop:4 }}>or click to browse · JPG / PNG / WebP · max 5 MB</div>
+            </div>
+          )}
+        </div>
+
         <div style={{ display:'flex', gap:12 }}>
           <button onClick={onClose} style={{ flex:1, padding:12, background:'rgba(255,255,255,0.05)', border:`1px solid ${T.border}`, borderRadius:10, color:T.sub, fontSize:14, fontWeight:600, cursor:'pointer' }}>Cancel</button>
-          <button onClick={handleSave} style={{ flex:2, padding:12, background:`linear-gradient(135deg,${T.green},#059669)`, border:'none', borderRadius:10, color:'#000', fontSize:14, fontWeight:900, cursor:'pointer' }}>+ Save Trade</button>
+          <button onClick={handleSave} disabled={uploading} style={{ flex:2, padding:12, background: uploading ? 'rgba(52,211,153,0.4)' : `linear-gradient(135deg,${T.green},#059669)`, border:'none', borderRadius:10, color:'#000', fontSize:14, fontWeight:900, cursor: uploading ? 'wait' : 'pointer' }}>
+            {uploading ? '⏳ Uploading…' : '+ Save Trade'}
+          </button>
         </div>
       </div>
     </div>
@@ -3311,6 +3399,21 @@ function Journal({ trades, setTrades, plan }) {
         </div>
         {sel ? (
           <div>
+            {/* Screenshot */}
+            {sel.screenshot_url && (
+              <div style={{ ...card, padding:0, overflow:'hidden', marginBottom:16, border:`1px solid ${T.border}` }}>
+                <a href={sel.screenshot_url} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={sel.screenshot_url}
+                    alt="Trade chart screenshot"
+                    style={{ width:'100%', maxHeight:220, objectFit:'cover', display:'block' }}
+                  />
+                </a>
+                <div style={{ padding:'6px 12px', color:T.muted, fontSize:11, background:'rgba(255,255,255,0.02)' }}>
+                  📸 Chart Screenshot · click to open full size
+                </div>
+              </div>
+            )}
             <div style={{ ...card, background:'rgba(99,102,241,0.05)', border:'1px solid rgba(99,102,241,0.22)', marginBottom:16 }}>
               <div style={{ fontSize:11, color:T.indigo, fontWeight:700, letterSpacing:'0.09em', marginBottom:12 }}>🧠 AI COACH</div>
               <div style={{ fontWeight:800, fontSize:15, marginBottom:8 }}>{sel.sym} {sel.dir} · {sel.date}</div>
