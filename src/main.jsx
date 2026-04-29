@@ -4806,42 +4806,6 @@ function SignalsWorkspace({ onNavigate }) {
   const [demoMode, setDemoMode] = useState(false);
   const ranOnce = React.useRef(false);
 
-  // ── Algo Engine: fetch latest SMC signal + open positions for this symbol ──
-  const [algoSignal,    setAlgoSignal]    = useState(null);
-  const [algoPosition,  setAlgoPosition]  = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        // Latest SMC signal for this symbol
-        const sigRes = await fetch(
-          `${SB_URL}/rest/v1/smc_signals?symbol=eq.${encodeURIComponent(sym)}&select=verdict,confidence,htf_trend,sweep_occurred,mss_occurred,reasoning_codes,session_name,created_at&order=created_at.desc&limit=1`,
-          { headers: SB_HDR }
-        );
-        const sigData = await sigRes.json();
-        if (!cancelled && Array.isArray(sigData) && sigData.length) {
-          setAlgoSignal(sigData[0]);
-        } else if (!cancelled) {
-          setAlgoSignal(null);
-        }
-
-        // Open paper position for this symbol
-        const posRes = await fetch(
-          `${SB_URL}/rest/v1/paper_positions?symbol=eq.${encodeURIComponent(sym)}&status=eq.OPEN&select=direction,entry_price,sl_price,tp1_price,confidence,opened_at&order=opened_at.desc&limit=1`,
-          { headers: SB_HDR }
-        );
-        const posData = await posRes.json();
-        if (!cancelled && Array.isArray(posData) && posData.length) {
-          setAlgoPosition(posData[0]);
-        } else if (!cancelled) {
-          setAlgoPosition(null);
-        }
-      } catch { /* ignore */ }
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [sym]);
 
   const runAnalysis = async () => {
     setLoading(true);
@@ -4955,20 +4919,7 @@ function SignalsWorkspace({ onNavigate }) {
     : result.verdict === 'NO TRADE' ? T.red
     : T.amber
     : T.muted;
-  const algoDerivedDir = algoSignal
-    ? (['LONG_NOW','WAIT_LONG'].includes(algoSignal.verdict) ? 'LONG'
-      : ['SHORT_NOW','WAIT_SHORT'].includes(algoSignal.verdict) ? 'SHORT'
-      : null)
-    : null;
-  const activeAlgoDir = algoPosition?.direction || algoDerivedDir;
-  const algoBlocksTrade = Boolean(
-    result &&
-    algoSignal &&
-    !algoPosition &&
-    !['LONG_NOW','SHORT_NOW','WAIT_LONG','WAIT_SHORT'].includes(algoSignal.verdict)
-  );
-  const engineConflict = Boolean(result?.direction && activeAlgoDir && result.direction !== activeAlgoDir);
-  const tradeExecutable = Boolean(result?.executable && !algoBlocksTrade && !engineConflict);
+  const tradeExecutable = Boolean(result?.executable);
   const displayDirection = tradeExecutable ? result.direction : null;
 
   return (
@@ -5049,95 +5000,6 @@ function SignalsWorkspace({ onNavigate }) {
             </div>
           )}
 
-          {/* ── Conflict / Consensus banner ── */}
-          {(() => {
-            const posDir = algoPosition?.direction || null;
-            const taDir = result.direction;
-            const conflict = engineConflict;
-            const confirmed = activeAlgoDir && taDir && activeAlgoDir === taDir;
-
-            if (algoBlocksTrade) return (
-              <div style={{ marginBottom: 14, padding: '12px 16px', borderRadius: 10,
-                background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.28)',
-                display:'flex', alignItems:'flex-start', gap: 12 }}>
-                <span style={{ fontSize: 20, flexShrink: 0 }}>⏸</span>
-                <div>
-                  <div style={{ color: T.amber, fontSize: 13, fontWeight: 800, marginBottom: 4 }}>
-                    ALGO BLOCK — latest SMC/ICT verdict is {algoSignal.verdict}
-                  </div>
-                  <div style={{ color: T.sub, fontSize: 12, lineHeight: 1.6 }}>
-                    The lower TA panel may show a directional bias, but paper entries follow the Algo Engine.
-                    Wait for WAIT/LONG_NOW/SHORT_NOW from SMC before validating or sizing this setup.
-                  </div>
-                </div>
-              </div>
-            );
-
-            if (conflict) return (
-              <div style={{ marginBottom: 14, padding: '12px 16px', borderRadius: 10,
-                background: 'rgba(239,68,68,0.09)', border: '1px solid rgba(239,68,68,0.3)',
-                display:'flex', alignItems:'flex-start', gap: 12 }}>
-                <span style={{ fontSize: 20, flexShrink: 0 }}>⚡</span>
-                <div>
-                  <div style={{ color: T.red, fontSize: 13, fontWeight: 800, marginBottom: 4 }}>
-                    ENGINE CONFLICT — TA says {taDir} · Algo has {activeAlgoDir} {posDir ? 'position OPEN' : 'signal'}
-                  </div>
-                  <div style={{ color: T.sub, fontSize: 12, lineHeight: 1.6 }}>
-                    These engines use different methods — TA reads short-term momentum (EMA/RSI/MACD),
-                    while the Algo engine reads market structure (SMC sweep+MSS on 15m+1h).
-                    When they conflict, <strong style={{ color: T.text }}>trust the Algo engine for entries</strong> —
-                    it uses the same logic as your paper trades.
-                    {posDir && <> The Algo LONG is currently open — do not manually short against it without closing it first.</>}
-                  </div>
-                </div>
-              </div>
-            );
-
-            if (confirmed) return (
-              <div style={{ marginBottom: 14, padding: '10px 16px', borderRadius: 10,
-                background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.25)',
-                display:'flex', alignItems:'center', gap: 12 }}>
-                <span style={{ fontSize: 18 }}>✅</span>
-                <div style={{ color: '#34D399', fontSize: 12, fontWeight: 700 }}>
-                  ENGINES ALIGNED — TA and Algo both signal {taDir}. High-conviction setup.
-                </div>
-              </div>
-            );
-
-            return null;
-          })()}
-
-          {/* ── Algo Engine reference card ── */}
-          {algoSignal && (
-            <div style={{ marginBottom: 14, padding: '12px 16px', borderRadius: 10,
-              background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.2)' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 800, color: '#818CF8', letterSpacing:'.06em' }}>🤖 ALGO ENGINE (SMC/ICT)</div>
-                <div style={{ fontSize: 10, color: T.muted }}>{timeAgo(algoSignal.created_at)}</div>
-              </div>
-              <div style={{ display:'flex', gap: 14, flexWrap:'wrap', fontSize: 12 }}>
-                <span style={{ color: T.sub }}>Verdict: <strong style={{ color:
-                  ['LONG_NOW','WAIT_LONG'].includes(algoSignal.verdict) ? T.green :
-                  ['SHORT_NOW','WAIT_SHORT'].includes(algoSignal.verdict) ? T.red : T.muted
-                }}>{algoSignal.verdict}</strong></span>
-                <span style={{ color: T.sub }}>Confidence: <strong style={{ color: T.text }}>{algoSignal.confidence}%</strong></span>
-                <span style={{ color: T.sub }}>HTF: <strong style={{ color:
-                  algoSignal.htf_trend === 'bullish' ? T.green :
-                  algoSignal.htf_trend === 'bearish' ? T.red : T.muted
-                }}>{(algoSignal.htf_trend||'—').toUpperCase()}</strong></span>
-                {algoSignal.sweep_occurred && <span style={{ color:'#F59E0B', fontWeight:700 }}>⚡ Sweep</span>}
-                {algoSignal.mss_occurred   && <span style={{ color:'#34D399', fontWeight:700 }}>✓ MSS</span>}
-              </div>
-              {algoPosition && (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(99,102,241,0.15)',
-                  fontSize: 11, color: algoPosition.direction === 'LONG' ? T.green : T.red, fontWeight: 700 }}>
-                  📋 Open {algoPosition.direction} position — Entry {Number(algoPosition.entry_price).toFixed(2)}
-                  {algoPosition.sl_price ? ` · SL ${Number(algoPosition.sl_price).toFixed(2)}` : ''}
-                  {algoPosition.tp1_price ? ` · TP1 ${Number(algoPosition.tp1_price).toFixed(2)}` : ''}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Header row */}
           <div style={{ display:'flex', gap: 20, alignItems:'flex-start', flexWrap:'wrap', marginBottom: 18 }}>
@@ -5196,7 +5058,7 @@ function SignalsWorkspace({ onNavigate }) {
                 />
               ) : (
                 <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 8, background:'rgba(245,158,11,0.07)', border:'1px solid rgba(245,158,11,0.18)', color:T.amber, fontSize:12, fontWeight:700 }}>
-                  No executable setup. Bias is {result.biasDirection}, but {algoBlocksTrade ? 'Algo Engine currently blocks entries.' : 'entry rules are not confirmed.'}
+                  No executable setup. Bias is {result.biasDirection}, but entry rules are not confirmed.
                 </div>
               )}
             </div>
@@ -5260,7 +5122,7 @@ function SignalsWorkspace({ onNavigate }) {
             border: `1px solid ${!tradeExecutable ? 'rgba(245,158,11,0.18)' : result.compliance === 'WARNING' ? 'rgba(239,68,68,0.18)' : 'rgba(16,185,129,0.14)'}`,
             fontSize: 12, color: !tradeExecutable ? T.amber : result.compliance === 'WARNING' ? T.red : '#34D399',
           }}>
-            {!tradeExecutable ? '⏸ Setup not executable yet.' : result.compliance === 'WARNING' ? '⚠️' : '✅'} {tradeExecutable ? result.compNote : (algoBlocksTrade ? `Algo verdict: ${algoSignal.verdict}.` : result.invalidation)}
+            {!tradeExecutable ? '⏸ Setup not executable yet.' : result.compliance === 'WARNING' ? '⚠️' : '✅'} {tradeExecutable ? result.compNote : result.invalidation}
           </div>
 
           {/* PosSizer + Journal */}
@@ -5543,7 +5405,7 @@ function SettingsWorkbench({ data, accountView, onUpdateAccount, plan }) {
       <div className="pp-panel" style={{ padding: 20 }}>
         <div style={{ fontWeight:800, fontSize:16, marginBottom:6 }}>📡 Market Data</div>
         <div style={{ color:T.sub, fontSize:13, marginBottom:16, lineHeight:1.6 }}>
-          Signals, Analyze, Dashboard, and Algo use the Supabase <code style={{ color:T.indigo }}>market-data</code> edge function backed by Yahoo Finance. No external API key is required for normal operation.
+          Signals, Analyze, and Dashboard use the Supabase <code style={{ color:T.indigo }}>market-data</code> edge function backed by Yahoo Finance. No external API key is required for normal operation.
         </div>
         <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
           <button onClick={testMarketData} disabled={marketTest.loading}
@@ -5718,7 +5580,7 @@ function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState
   const phColors = { s1:'#3B82F6', s2:'#8B5CF6', fs:'#10B981', sw:'#F59E0B' };
   const screenLabels = {
     dashboard:'Today', signals:'Signals', analyze:'Analyze',
-    algo:'Algo Trading', journal:'Journal', risk:'Risk Calc', analytics:'Analytics',
+    journal:'Journal', risk:'Risk Calc', analytics:'Analytics',
     challenge:'Challenge', settings:'Settings',
   };
 
@@ -6768,494 +6630,6 @@ function AuthGate({ children }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ALGO TRADING TAB — Live paper account + positions from Supabase
-// ═══════════════════════════════════════════════════════════════════════════
-
-function AlgoTradingTab({ user }) {
-  void user;
-  const [acct,      setAcct]      = useState(null);
-  const [positions, setPositions] = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [prices,    setPrices]    = useState({});
-  const [killBusy,  setKillBusy]  = useState(false);
-  const [cycleBusy, setCycleBusy] = useState(false);
-  const [updateBusy, setUpdateBusy] = useState(false);
-  const [cycleResult, setCycleResult] = useState(null);
-  const [posView,   setPosView]   = useState('open'); // 'open' | 'history'
-  const { show: showToast } = useToast();
-
-  // ── Load data from Supabase ───────────────────────────────────────────────
-  const load = useCallback(async () => {
-    try {
-      const [acctRes, posRes] = await Promise.all([
-        fetch(`${SB_URL}/rest/v1/paper_account?id=eq.1&select=*`, {
-          headers: { ...SB_HDR, Accept: 'application/vnd.pgrst.object+json' }
-        }),
-        fetch(`${SB_URL}/rest/v1/paper_positions?order=opened_at.desc&limit=100&select=*`, {
-          headers: SB_HDR
-        }),
-      ]);
-      if (acctRes.ok) { const d = await acctRes.json(); if (d) setAcct(d); }
-      if (posRes.ok)  { const d = await posRes.json();  if (Array.isArray(d)) setPositions(d); }
-    } catch {
-      setAcct(null);
-      setPositions([]);
-    }
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 30000); // refresh every 30s
-    return () => clearInterval(t);
-  }, [load]);
-
-  // ── Fetch live prices for open positions ─────────────────────────────────
-  useEffect(() => {
-    const openSyms = [...new Set(positions.filter(p => ['OPEN','TP1_HIT'].includes(p.status)).map(p => p.symbol))];
-    if (openSyms.length === 0) { setPrices({}); return; }
-    mdFetchPrices(openSyms).then(pm => setPrices(pm)).catch(() => {});
-  }, [positions]);
-
-  // ── Realtime subscription ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (!sbClient) return;
-    const ch = sbClient.channel('algo-rt')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'paper_account' }, () => load())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'paper_positions' }, () => load())
-      .subscribe();
-    return () => sbClient.removeChannel(ch);
-  }, [load]);
-
-  // ── Kill switch toggle ────────────────────────────────────────────────────
-  const toggleKillSwitch = async () => {
-    if (!acct) return;
-    setKillBusy(true);
-    const newVal = !acct.kill_switch_active;
-    try {
-      const headers = await getAuthedJsonHeaders();
-      await fetch(`${SB_URL}/rest/v1/paper_account?id=eq.1`, {
-        method: 'PATCH',
-        headers: { ...headers, Prefer: 'return=minimal' },
-        body: JSON.stringify({
-          kill_switch_active: newVal,
-          kill_switch_reason: newVal ? 'Manual stop from PropPilot UI' : null,
-          kill_switch_at: newVal ? new Date().toISOString() : null,
-        }),
-      });
-      setAcct(prev => ({ ...prev, kill_switch_active: newVal }));
-      showToast(newVal ? '🛑 Kill Switch активирован' : '✅ Kill Switch снят', newVal ? 'warn' : 'success');
-    } catch { showToast('Ошибка при обновлении Kill Switch', 'error'); }
-    setKillBusy(false);
-  };
-
-  const runPaperCycle = async ({ demoTest = false } = {}) => {
-    setCycleBusy(true);
-    setCycleResult(null);
-    try {
-      const headers = await getAuthedJsonHeaders();
-      const res = await fetch(`${SB_URL}/functions/v1/auto-analyze`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          autoTrade: true,
-          demoTest,
-          paperFallback: true,
-          symbols: ['XAU/USD', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'NAS100', 'BTC/USD'],
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      setCycleResult(json);
-      if (!res.ok) {
-        showToast(json.error || 'Paper cycle failed', 'error');
-        return;
-      }
-      if (json.tradesOpened > 0) {
-        showToast(demoTest ? '🧪 Demo paper trade opened' : '✅ Paper trade opened from model signal', 'success', 5000);
-      } else if (Array.isArray(json.tradeResults) && json.tradeResults.length > 0) {
-        const firstReject = json.tradeResults.find(r => !r.success) || json.tradeResults[0];
-        showToast(firstReject.error || 'Trade signal was rejected by risk filters', 'warn', 7000);
-      } else if ((json.actionable ?? 0) === 0) {
-        const best = Array.isArray(json.signals)
-          ? [...json.signals].sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0]
-          : null;
-        showToast(
-          best
-            ? `No executable signal. Best: ${best.symbol} ${best.verdict} ${best.confidence}%`
-            : 'No executable signal right now. Analysis saved.',
-          'info',
-          7000
-        );
-      } else {
-        showToast('No executable signal right now. Analysis saved.', 'info', 5000);
-      }
-      await load();
-    } catch (err) {
-      showToast(err.message || 'Sign in required for paper trading', 'error', 6000);
-    } finally {
-      setCycleBusy(false);
-    }
-  };
-
-  const syncPositions = async () => {
-    setUpdateBusy(true);
-    try {
-      const headers = await getAuthedJsonHeaders();
-      const res = await fetch(`${SB_URL}/functions/v1/update-paper-positions`, {
-        method: 'POST',
-        headers,
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        showToast(json.error || 'Position sync failed', 'error', 5000);
-        return;
-      }
-      showToast(`Positions synced: ${json.updated || 0} updated, ${json.closed || 0} closed`, 'success', 4500);
-      await load();
-    } catch (err) {
-      showToast(err.message || 'Sign in required to sync positions', 'error', 6000);
-    } finally {
-      setUpdateBusy(false);
-    }
-  };
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  const openPos    = positions.filter(p => ['OPEN','TP1_HIT'].includes(p.status));
-  const closedPos  = positions.filter(p => !['OPEN','TP1_HIT'].includes(p.status));
-  const totalOpenPnl = openPos.reduce((s, p) => {
-    const live = prices[p.symbol];
-    if (!live) return s + safeNum(p.pnl_usd, 0);
-    const dir  = p.direction === 'LONG' ? 1 : -1;
-    const contract = getInstrumentSpec(p.symbol).contractSize;
-    const lotSize = safeNum(p.lot_size, 0.01);
-    return s + (live - safeNum(p.entry_price, live)) * dir * lotSize * contract;
-  }, 0);
-
-  const rCurve = closedPos
-    .sort((a,b) => new Date(a.closed_at||a.created_at) - new Date(b.closed_at||b.created_at))
-    .reduce((acc, p) => {
-      const prev = acc[acc.length - 1]?.value || 0;
-      acc.push({
-        label: new Date(p.closed_at||p.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short' }),
-        value: prev + safeNum(p.pnl_r, 0),
-      });
-      return acc;
-    }, []);
-
-  const ks = acct?.kill_switch_active;
-
-  // ── Outcome badge ─────────────────────────────────────────────────────────
-  const outcomeBadge = (status) => {
-    const map = {
-      'TP1_HIT': { lbl:'TP1 ✓', c:T.green },
-      'TP2_HIT': { lbl:'TP2 ✓✓', c:'#34D399' },
-      'SL_HIT':  { lbl:'SL ✗', c:T.red },
-      'EXPIRED': { lbl:'Expired', c:T.muted },
-      'KILL_SWITCH': { lbl:'Kill Switch', c:T.amber },
-      'MANUAL_CLOSE': { lbl:'Manual', c:T.sub },
-      'OPEN':    { lbl:'OPEN', c:T.blue },
-    };
-    const m = map[status] || { lbl: status, c: T.muted };
-    return <Badge label={m.lbl} color={m.c}/>;
-  };
-
-  if (loading) return (
-    <div className="pp-grid pp-grid-4x">
-      {[...Array(8)].map((_,i) => <div key={i} className="pp-skeleton" style={{ height: i<4?120:220 }}/>)}
-    </div>
-  );
-
-  return (
-    <div className="pp-grid" style={{ gap:20 }}>
-
-      {/* ── Kill Switch Banner ── */}
-      {ks && (
-        <div style={{ padding:'16px 24px', borderRadius:14, background:'rgba(239,68,68,0.08)', border:'2px solid rgba(239,68,68,0.35)', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:12 }}>
-          <div>
-            <div style={{ fontWeight:900, fontSize:16, color:T.red, marginBottom:4 }}>🛑 KILL SWITCH АКТИВЕН — Автоторговля остановлена</div>
-            <div style={{ color:T.sub, fontSize:13 }}>{acct?.kill_switch_reason || 'Причина не указана'}</div>
-          </div>
-          <button onClick={toggleKillSwitch} disabled={killBusy}
-            style={{ padding:'10px 22px', background:`linear-gradient(135deg,${T.green},#059669)`, border:'none', borderRadius:9, color:'#fff', fontWeight:800, fontSize:13, cursor:'pointer' }}>
-            {killBusy ? '⏳' : '✅ Возобновить торговлю'}
-          </button>
-        </div>
-      )}
-
-      {/* ── Account KPIs ── */}
-      {!acct ? (
-        <div className="pp-panel" style={{ padding:32, textAlign:'center', color:T.muted }}>
-          <div style={{ fontSize:36, marginBottom:12 }}>📊</div>
-          <div style={{ fontWeight:800, fontSize:16, color:T.sub, marginBottom:8 }}>Нет данных paper account</div>
-          <div style={{ fontSize:13, maxWidth:360, margin:'0 auto', lineHeight:1.7 }}>
-            Запусти SQL миграцию в Supabase Dashboard, чтобы создать таблицу paper_account.
-          </div>
-        </div>
-      ) : (
-        <div className="pp-grid pp-grid-4x">
-          <ShellKpi
-            label="Balance"
-            value={`$${Number(acct.balance||100000).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`}
-            sub={`Equity $${Number(acct.equity||acct.balance||100000).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}`}
-            color={T.blue}
-          />
-          <ShellKpi
-            label="Open P&L"
-            value={`${totalOpenPnl>=0?'+':''}$${totalOpenPnl.toFixed(2)}`}
-            sub={`${openPos.length} open position${openPos.length===1?'':'s'}`}
-            color={totalOpenPnl>=0?T.green:T.red}
-          />
-          <ShellKpi
-            label="Win Rate"
-            value={acct.total_trades ? `${((acct.win_trades||0)/acct.total_trades*100).toFixed(1)}%` : '—'}
-            sub={`${acct.win_trades||0}W · ${acct.loss_trades||0}L · ${acct.total_trades||0} total`}
-            color={(acct.win_trades||0)/(acct.total_trades||1)>=0.5 ? T.green : T.red}
-          />
-          <ShellKpi
-            label="Max Drawdown"
-            value={`${Number(acct.max_drawdown||0).toFixed(2)}%`}
-            sub={`Daily P&L: ${acct.daily_pnl_usd>=0?'+':''}$${Number(acct.daily_pnl_usd||0).toFixed(2)}`}
-            color={Number(acct.max_drawdown||0) > 5 ? T.red : T.green}
-          />
-        </div>
-      )}
-
-      {/* ── Second row KPIs ── */}
-      {acct && (
-        <div className="pp-grid pp-grid-4x">
-          <ShellKpi
-            label="Profit Factor"
-            value={acct.profit_factor ? Number(acct.profit_factor).toFixed(2) : '—'}
-            sub="Gross Win / Gross Loss"
-            color={Number(acct.profit_factor||0)>=1.5 ? T.green : Number(acct.profit_factor||0)>=1 ? T.amber : T.red}
-          />
-          <ShellKpi
-            label="Avg P&L per Trade"
-            value={acct.avg_pnl_r ? `${Number(acct.avg_pnl_r)>=0?'+':''}${Number(acct.avg_pnl_r).toFixed(2)}R` : '—'}
-            sub="Expected value per trade"
-            color={Number(acct.avg_pnl_r||0)>=0 ? T.green : T.red}
-          />
-          <ShellKpi
-            label="Daily Trades"
-            value={String(acct.daily_trades||0)}
-            sub={`Session count: ${acct.session_count||0}`}
-            color={T.sub}
-          />
-          <div className="pp-panel" style={{ padding:16, display:'flex', flexDirection:'column', justifyContent:'space-between' }}>
-            <div style={{ color:T.muted, fontSize:11, fontWeight:700, textTransform:'uppercase', letterSpacing:'.07em', marginBottom:8 }}>Kill Switch</div>
-            <button onClick={toggleKillSwitch} disabled={killBusy}
-              style={{ width:'100%', padding:'10px 0', borderRadius:9, border:'none', cursor:killBusy?'wait':'pointer', fontWeight:800, fontSize:13,
-                background: ks ? `linear-gradient(135deg,${T.green},#059669)` : `linear-gradient(135deg,${T.red},#991B1B)`,
-                color:'#fff', transition:'all .2s' }}>
-              {killBusy ? '⏳ …' : ks ? '▶ Resume Trading' : '🛑 Stop All Trading'}
-            </button>
-            <div style={{ color:T.muted, fontSize:10, marginTop:6, textAlign:'center' }}>{ks ? 'Trading paused — click to resume' : 'All systems running'}</div>
-          </div>
-        </div>
-      )}
-
-      <div className="pp-panel" style={{ padding:20 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:14 }}>
-          <div>
-            <div style={{ fontWeight:900, fontSize:16, marginBottom:4 }}>Paper Algo Test</div>
-            <div style={{ color:T.sub, fontSize:12, lineHeight:1.6 }}>
-              Реальные market data, демо-деньги, без брокера и без live orders.
-            </div>
-          </div>
-          <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-            <button
-              onClick={() => runPaperCycle({ demoTest:false })}
-              disabled={cycleBusy || ks}
-              style={{ padding:'10px 16px', borderRadius:9, border:`1px solid ${T.border}`, background:'rgba(255,255,255,0.06)', color:T.text, fontWeight:800, cursor:cycleBusy||ks?'not-allowed':'pointer' }}>
-              {cycleBusy ? 'Running…' : 'Run Model Cycle'}
-            </button>
-            <button
-              onClick={() => runPaperCycle({ demoTest:true })}
-              disabled={cycleBusy || ks}
-              style={{ padding:'10px 16px', borderRadius:9, border:'none', background:`linear-gradient(135deg,${T.indigo},${T.blue})`, color:'#fff', fontWeight:900, cursor:cycleBusy||ks?'not-allowed':'pointer' }}>
-              {cycleBusy ? 'Running…' : 'Force Demo Test'}
-            </button>
-            <button
-              onClick={syncPositions}
-              disabled={updateBusy}
-              style={{ padding:'10px 16px', borderRadius:9, border:`1px solid rgba(16,185,129,0.35)`, background:'rgba(16,185,129,0.08)', color:T.green, fontWeight:900, cursor:updateBusy?'wait':'pointer' }}>
-              {updateBusy ? 'Syncing…' : 'Sync Positions'}
-            </button>
-          </div>
-        </div>
-        {cycleResult && (
-          <div style={{ marginTop:14, padding:12, borderRadius:10, background:'rgba(255,255,255,0.035)', border:`1px solid ${T.border}`, color:T.sub, fontSize:12, display:'grid', gap:6 }}>
-            <div>
-              Analyzed <b style={{ color:T.text }}>{cycleResult.analyzed ?? 0}</b> symbols · actionable <b style={{ color:T.text }}>{cycleResult.actionable ?? 0}</b> · opened <b style={{ color:cycleResult.tradesOpened ? T.green : T.amber }}>{cycleResult.tradesOpened ?? 0}</b>
-            </div>
-            {Array.isArray(cycleResult.tradeResults) && cycleResult.tradeResults.length > 0 && (
-              <div>
-                {cycleResult.tradeResults.map((r, i) => (
-                  <div key={i} style={{ color:r.success ? T.green : T.red }}>
-                    {r.success ? 'Opened' : 'Rejected'} {r.symbol || ''}{r.direction ? ` ${r.direction}` : ''}{r.error ? ` · ${r.error}` : ''}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* ── R-Curve ── */}
-      {rCurve.length > 1 && (
-        <div className="pp-panel" style={{ padding:20 }}>
-          <div style={{ fontWeight:800, fontSize:16, marginBottom:4 }}>Live R Equity Curve</div>
-          <div style={{ color:T.sub, fontSize:12, marginBottom:14 }}>Накопленный P&L в R-единицах · {closedPos.length} закрытых позиций</div>
-          <MiniLineChart points={rCurve} color={rCurve[rCurve.length-1]?.value >= 0 ? T.green : T.red} label="Closed positions will build the curve"/>
-        </div>
-      )}
-
-      {/* ── Positions ── */}
-      <div className="pp-panel" style={{ padding:20 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:10 }}>
-          <div style={{ fontWeight:800, fontSize:16 }}>Позиции</div>
-          <div style={{ display:'flex', gap:6, padding:'3px', background:'rgba(255,255,255,0.04)', borderRadius:10, border:'1px solid rgba(255,255,255,0.06)' }}>
-            {[['open', `Открытые (${openPos.length})`], ['history', `История (${closedPos.length})`]].map(([id, lbl]) => (
-              <button key={id} onClick={() => setPosView(id)}
-                style={{ padding:'6px 16px', borderRadius:8, border:'none', cursor:'pointer', fontWeight:700, fontSize:12,
-                  background: posView===id ? 'rgba(255,255,255,0.1)' : 'transparent',
-                  color: posView===id ? T.text : T.muted }}>
-                {lbl}
-              </button>
-            ))}
-          </div>
-          <div style={{ display:'flex', gap:8 }}>
-            <button onClick={syncPositions} disabled={updateBusy} style={{ padding:'6px 14px', background:'rgba(16,185,129,0.08)', border:'1px solid rgba(16,185,129,0.25)', borderRadius:8, color:T.green, fontSize:12, fontWeight:800, cursor:updateBusy?'wait':'pointer' }}>{updateBusy ? 'Syncing…' : '↻ Sync'}</button>
-            <button onClick={load} style={{ padding:'6px 14px', background:'transparent', border:`1px solid ${T.border}`, borderRadius:8, color:T.muted, fontSize:12, cursor:'pointer' }}>⟳ Refresh</button>
-          </div>
-        </div>
-
-        {posView === 'open' && (
-          openPos.length === 0 ? (
-            <div style={{ textAlign:'center', padding:'40px 0', color:T.muted }}>
-              <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
-              <div>Нет открытых позиций</div>
-              <div style={{ fontSize:12, marginTop:6, color:T.muted }}>Run Model Cycle открывает paper position только по executable сигналу</div>
-            </div>
-          ) : (
-            <div style={{ display:'grid', gap:10 }}>
-              {openPos.map(pos => {
-                const live = prices[pos.symbol];
-                const dir  = pos.direction === 'LONG' ? 1 : -1;
-                const contract = getInstrumentSpec(pos.symbol).contractSize;
-                const lotSize = safeNum(pos.lot_size, 0.01);
-                const unrPnl = live ? (live - safeNum(pos.entry_price, live)) * dir * lotSize * contract : safeNum(pos.pnl_usd, 0);
-                return (
-                  <div key={pos.id} className="pp-panel" style={{ padding:'14px 18px', border:`1px solid ${unrPnl>=0?'rgba(16,185,129,0.2)':'rgba(239,68,68,0.2)'}` }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:10 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-                        <div style={{ width:10, height:10, borderRadius:5, background: pos.direction==='LONG'?T.green:T.red, boxShadow:`0 0 8px ${pos.direction==='LONG'?T.green:T.red}` }}/>
-                        <div>
-                          <div style={{ fontWeight:900, fontSize:16 }}>{pos.symbol}</div>
-                          <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:2 }}>
-                            <span style={{ color: pos.direction==='LONG'?T.green:T.red, fontSize:11, fontWeight:800 }}>{pos.direction}</span>
-                            {pos.status === 'TP1_HIT' && <Badge label="TP1 HIT" color={T.green}/>}
-                          </div>
-                        </div>
-                        <div style={{ display:'flex', gap:16, marginLeft:8 }}>
-                          {[
-                            ['Entry', Number(pos.entry_price||0).toFixed(pos.symbol?.includes('JPY')?3:pos.symbol==='XAU/USD'?2:4)],
-                            ['SL',    Number(pos.sl_price||0).toFixed(pos.symbol?.includes('JPY')?3:pos.symbol==='XAU/USD'?2:4), T.red],
-                            ['TP1',   Number(pos.tp1_price||0).toFixed(pos.symbol?.includes('JPY')?3:pos.symbol==='XAU/USD'?2:4), T.green],
-                            ['TP2',   Number(pos.tp2_price||0).toFixed(pos.symbol?.includes('JPY')?3:pos.symbol==='XAU/USD'?2:4), '#34D399'],
-                          ].map(([k, v, vc]) => (
-                            <div key={k} style={{ textAlign:'center' }}>
-                              <div style={{ color:T.muted, fontSize:9, fontWeight:700 }}>{k}</div>
-                              <div style={{ color:vc||T.text, fontWeight:800, fontSize:12, fontFamily:'monospace' }}>{v}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                      <div style={{ textAlign:'right' }}>
-                        <div style={{ color: unrPnl>=0?T.green:T.red, fontWeight:900, fontSize:20 }}>
-                          {unrPnl>=0?'+':''}${unrPnl.toFixed(2)}
-                        </div>
-                        {live && <div style={{ color:T.muted, fontSize:11 }}>Live: {live.toFixed(pos.symbol==='XAU/USD'?2:4)}</div>}
-                        <div style={{ color:T.muted, fontSize:10 }}>{timeAgo(pos.opened_at)}</div>
-                      </div>
-                    </div>
-                    <TpSlBar
-                      entry={safeNum(pos.entry_price)}
-                      sl={safeNum(pos.sl_price)}
-                      tp1={safeNum(pos.tp1_price)}
-                      tp2={safeNum(pos.tp2_price)}
-                      currentPrice={live}
-                      direction={pos.direction}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )
-        )}
-
-        {posView === 'history' && (
-          closedPos.length === 0 ? (
-            <div style={{ textAlign:'center', padding:'40px 0', color:T.muted }}>
-              <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
-              <div>Нет закрытых позиций</div>
-            </div>
-          ) : (
-            <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-                <thead>
-                  <tr style={{ borderBottom:`1px solid ${T.border}` }}>
-                    {['Символ','Направление','Исход','P&L $','P&L R','Confidence','Закрыто'].map(h => (
-                      <th key={h} style={{ padding:'8px 12px', textAlign:'left', color:T.muted, fontWeight:700, fontSize:11 }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {closedPos.slice(0, 40).map(pos => {
-                    const pnlUsd = safeNum(pos.pnl_usd, null) ?? safeNum(pos.partial_pnl_usd, 0);
-                    const pnlR   = safeNum(pos.pnl_r,   null) ?? safeNum(pos.partial_pnl_r,   0);
-                    return (
-                      <tr key={pos.id} style={{ borderBottom:`1px solid rgba(148,163,184,.07)` }}>
-                        <td style={{ padding:'10px 12px', fontWeight:800 }}>{pos.symbol}</td>
-                        <td style={{ padding:'10px 12px', color:pos.direction==='LONG'?T.green:T.red, fontWeight:700 }}>{pos.direction==='LONG'?'🟢 LONG':'🔴 SHORT'}</td>
-                        <td style={{ padding:'10px 12px' }}>{outcomeBadge(pos.status)}</td>
-                        <td style={{ padding:'10px 12px', color:pnlUsd>=0?T.green:T.red, fontWeight:800 }}>{pnlUsd>=0?'+':''}${Number(pnlUsd).toFixed(2)}</td>
-                        <td style={{ padding:'10px 12px', color:pnlR>=0?T.green:T.red, fontWeight:700 }}>{fmtR(pnlR)}</td>
-                        <td style={{ padding:'10px 12px', color:T.sub }}>{safeNum(pos.confidence,0)}%</td>
-                        <td style={{ padding:'10px 12px', color:T.muted }}>{timeAgo(pos.closed_at||pos.updated_at)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )
-        )}
-      </div>
-
-      {/* ── How it works ── */}
-      <div className="pp-panel" style={{ padding:20 }}>
-        <div style={{ fontWeight:800, fontSize:15, marginBottom:14 }}>⚙️ Как работает Algo система</div>
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(200px, 1fr))', gap:12 }}>
-          {[
-            { icon:'🕐', step:'auto-analyze', desc:'Анализирует 6 символов на реальных данных и сохраняет сигналы в БД', color:T.blue },
-            { icon:'⚡', step:'execute-paper-trade', desc:'Run Model Cycle передаёт executable сигнал в risk engine и открывает paper position', color:T.teal },
-            { icon:'📊', step:'update-paper-positions', desc:'Каждые 30 мин проверяет TP/SL открытых позиций и закрывает их', color:T.green },
-            { icon:'🛡️', step:'Kill Switch', desc:'Автоматически останавливает торговлю при превышении daily loss или max drawdown', color:T.red },
-          ].map(s => (
-            <div key={s.step} style={{ padding:'14px 16px', background:'rgba(255,255,255,0.03)', border:'1px solid rgba(255,255,255,0.07)', borderRadius:12 }}>
-              <div style={{ fontSize:24, marginBottom:8 }}>{s.icon}</div>
-              <div style={{ fontWeight:800, fontSize:13, color:s.color, marginBottom:6 }}>{s.step}</div>
-              <div style={{ color:T.sub, fontSize:12, lineHeight:1.65 }}>{s.desc}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // BACKTEST TAB — saved runs + quick server-side smoke backtests
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -7511,7 +6885,6 @@ const TABS = [
   { id:'signals',   label:'Signals',   icon:'⚡' },
   { id:'news',      label:'Calendar',  icon:'📅' },
   { id:'analyze',   label:'Analyze',   icon:'◬' },
-  { id:'algo',      label:'Algo',      icon:'📊' },
   { id:'backtest',  label:'Backtest',  icon:'↺' },
   { id:'journal',   label:'Journal',   icon:'▦' },
   { id:'challenge', label:'Challenge', icon:'◎' },
@@ -7692,7 +7065,6 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
               {screen === 'signals'   && <SignalsWorkspace onNavigate={setScreen}/>}
               {screen === 'news'      && <EconomicCalendarTab/>}
               {screen === 'analyze'   && <CheckTrade account={accountView} phase={phase} onNavigate={setScreen}/>}
-              {screen === 'algo'      && <AlgoTradingTab user={user}/>}
               {screen === 'backtest'  && <BacktestTab/>}
               {screen === 'journal'   && <Journal trades={trades} setTrades={handleTradesChange} plan={userPlan}/>}
               {screen === 'risk'      && <RiskCalc account={accountView}/>}
