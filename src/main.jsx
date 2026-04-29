@@ -200,8 +200,8 @@ function PriceChart({ data }) {
 }
 
 // ── API ENDPOINTS ────────────────────────────────────────────────────────────
-const SB_URL = import.meta.env.VITE_SUPABASE_URL || 'https://nxiednydxyrtxpkmgtof.supabase.co';
-const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzMxMDAsImV4cCI6MjA5MjUwOTEwMH0.yPvkGuw6KPoBluEyTu7kFGJ0h6ClxbU6g_spn20XU68';
+const SB_URL = import.meta.env.VITE_SUPABASE_URL || 'https://tcqxctkdsyiptlifsgwm.supabase.co';
+const SB_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjcXhjdGtkc3lpcHRsaWZzZ3dtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4NjAwMjgsImV4cCI6MjA5MTQzNjAyOH0.AjnKY9gEalOdLlu5v6sHAIYn4Jz3gf44GtklZTNXDJw';
 const SB_HDR = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` };
 const SB_JSON_HDR = { ...SB_HDR, 'Content-Type': 'application/json' };
 const FN_URL = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL || `${SB_URL}/functions/v1`;
@@ -4252,8 +4252,12 @@ function TodayScreen({ data, phase, accountView, trades, onNavigate }) {
 
   // Signals
   const allSignals    = data.signals || [];
+  const _48h = Date.now() - 48 * 60 * 60 * 1000;
   const activeSignals = allSignals.filter(s =>
-    ['LONG_NOW','SHORT_NOW'].includes(s.signal_state) && s.outcome === 'OPEN'
+    ['LONG_NOW','SHORT_NOW'].includes(s.signal_state) &&
+    s.outcome === 'OPEN' &&
+    s.session_name !== 'Dead' &&
+    new Date(s.created_at).getTime() > _48h
   );
   return (
     <div className="pp-grid" style={{ gap:20 }}>
@@ -4462,7 +4466,7 @@ function ExecutiveDashboard({ data, phase }) {
   const positions     = data.positions || [];
   const allSignals    = data.signals || [];
   const openPositions = positions.filter(p => p.status === 'OPEN' || p.status === 'TP1_HIT');
-  const activeSignals = allSignals.filter(s => ['LONG_NOW','SHORT_NOW'].includes(s.signal_state) && s.outcome === 'OPEN').slice(0, 6);
+  const activeSignals = allSignals.filter(s => ['LONG_NOW','SHORT_NOW'].includes(s.signal_state) && s.outcome === 'OPEN' && s.session_name !== 'Dead' && new Date(s.created_at).getTime() > Date.now() - 48*60*60*1000).slice(0, 6);
   const [analyzing, setAnalyzing] = useState(false);
 
   const equity  = safeNum(account.equity,  safeNum(account.balance, 100000)) || 100000;
@@ -5911,11 +5915,11 @@ class TabBoundary extends React.Component {
 // NEWS SYSTEM — hooks + components
 // ═══════════════════════════════════════════════════════════════════════════
 
-const SB_URL_CONST  = 'https://nxiednydxyrtxpkmgtof.supabase.co';
+// SB_URL_CONST removed — use SB_URL
 const SB_ANON_KEY   = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54aWVkbnlkeHlydHhwa21ndG9mIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU2MDMzNTIsImV4cCI6MjA2MTE3OTM1Mn0.7YWnCo0SLSMU7UBB2LlZvRbQmXD9fM5n_nkbLqHB3NQ';
 
 async function fetchCalendarAPI(params = '') {
-  const res = await fetch(`${SB_URL_CONST}/functions/v1/calendar${params}`, {
+  const res = await fetch(`${SB_URL}/functions/v1/calendar${params}`, {
     headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${SB_ANON_KEY}` },
   });
   if (!res.ok) throw new Error('calendar fetch failed');
