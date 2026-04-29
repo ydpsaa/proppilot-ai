@@ -1234,20 +1234,45 @@ function Dashboard({ account, phase }) {
   }, []);
 
   const fetchCalendar = useCallback(async () => {
-    const CACHE_KEY = 'ff_cal_v2';
+    const CACHE_KEY = 'ff_cal_v3';
+    const CACHE_TTL = 15 * 60 * 1000; // 15 min
     const cached = LS.get(CACHE_KEY, null);
-    if (cached && (Date.now() - cached.ts) < 3_600_000) { setNews(cached.data); return; }
+    if (cached && (Date.now() - cached.ts) < CACHE_TTL) { setNews(cached.data); return; }
     try {
-      const r = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json?version=9');
-      if (!r.ok) throw new Error('fetch');
-      const data = await r.json();
-      if (!Array.isArray(data)) throw new Error('bad');
-      const todayISO = new Date().toISOString().slice(0, 10);
-      const todayEvts = data.filter(e => e.date?.startsWith(todayISO) && ['High','Medium'].includes(e.impact));
-      LS.set(CACHE_KEY, { data: todayEvts, ts: Date.now() });
-      setNews(todayEvts);
+      // Use Supabase Edge Function proxy (avoids CORS, adds this+next week)
+      const r = await fetch(`${FN_URL}/calendar`, { headers: { 'apikey': SB_KEY } });
+      if (!r.ok) throw new Error('calendar fetch failed');
+      const json = await r.json();
+      const events = json?.events;
+      if (!Array.isArray(events)) throw new Error('bad response');
+      // Normalise fields: edge fn returns {impact,title,currency,date,dateLabel}
+      const normalised = events.map(e => ({
+        impact:    e.impact,
+        title:     e.title,
+        currency:  e.currency || e.country || '—',
+        date:      e.date,
+        dateLabel: e.dateLabel || '—',
+        forecast:  e.forecast ?? null,
+        previous:  e.previous ?? null,
+      }));
+      LS.set(CACHE_KEY, { data: normalised, ts: Date.now() });
+      setNews(normalised);
     } catch {
-      setNews([{ impact:'High', title:'CPI / NFP — check ForexFactory', country:'USD', time:'—', date: new Date().toISOString().slice(0,10) }]);
+      // Fallback: direct ForexFactory fetch
+      try {
+        const r2 = await fetch('https://nfs.faireconomy.media/ff_calendar_thisweek.json');
+        if (r2.ok) {
+          const data = await r2.json();
+          if (Array.isArray(data)) {
+            const evts = data
+              .filter(e => ['High','Medium'].includes(e.impact) && ['USD','EUR','GBP','JPY'].includes(e.country))
+              .map(e => ({ impact: e.impact === 'High' ? 'HIGH' : 'MED', title: e.title, currency: e.country, date: e.date, dateLabel: '—' }));
+            setNews(evts);
+            return;
+          }
+        }
+      } catch { /* ignore */ }
+      setNews([{ impact:'HIGH', title:'CPI / NFP — check ForexFactory', currency:'USD', date: new Date().toISOString(), dateLabel:'—' }]);
     }
   }, []);
 
@@ -5697,6 +5722,15 @@ function currentSession() {
 
 function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState, rtStatus, lastLoadAt, onRefresh, onSetup, onNotif, notifPerm, user, onLogout, appData, gateData, trades }) {
 
+  const [showAccMenu, setShowAccMenu] = React.useState(false);
+  const accMenuRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!showAccMenu) return;
+    const handler = (e) => { if (accMenuRef.current && !accMenuRef.current.contains(e.target)) setShowAccMenu(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAccMenu]);
+
   const phColors = { s1:'#3B82F6', s2:'#8B5CF6', fs:'#10B981', sw:'#F59E0B' };
   const screenLabels = {
     markets:'Today', dashboard:'Today', signals:'Signals', analyze:'Analyze',
@@ -5881,12 +5915,61 @@ function UnifiedAppHeader({ screen, phase, onPhaseChange, accountView, syncState
             </button>
           )}
           <button className="pp-btn" onClick={() => onRefresh('updating')} title="Refresh" style={{ padding:'6px 9px' }}>↻</button>
-          <button className="pp-btn pp-btn-primary" onClick={onSetup} style={{ fontSize:11, padding:'7px 12px' }}>⚙ Account</button>
-          {onLogout && (
-            <button className="pp-btn" onClick={onLogout}
-              title={user?.email ? `Sign out — ${user.email}` : 'Sign out'}
-              style={{ padding:'6px 8px', color:T.muted, fontSize:13 }}>↩</button>
-          )}
+          {/* Account dropdown */}
+          <div ref={accMenuRef} style={{ position:'relative' }}>
+            <button
+              className="pp-btn pp-btn-primary"
+              onClick={() => setShowAccMenu(v => !v)}
+              style={{ fontSize:11, padding:'7px 12px', display:'flex', alignItems:'center', gap:6 }}>
+              <span style={{ fontSize:14 }}>◉</span>
+              <span>{user?.email ? user.email.split('@')[0] : 'Account'}</span>
+              <span style={{ fontSize:9, opacity:.7 }}>{showAccMenu ? '▲' : '▼'}</span>
+            </button>
+            {showAccMenu && (
+              <div style={{
+                position:'absolute', top:'calc(100% + 8px)', right:0, zIndex:9999,
+                background:'#1a1a2e', border:`1px solid ${T.border}`, borderRadius:14,
+                minWidth:240, boxShadow:'0 8px 32px rgba(0,0,0,.6)', overflow:'hidden'
+              }}>
+                {/* User info */}
+                <div style={{ padding:'14px 16px', borderBottom:`1px solid ${T.border}` }}>
+                  <div style={{ fontSize:11, color:T.muted, fontWeight:700, letterSpacing:'.06em', marginBottom:4 }}>SIGNED IN AS</div>
+                  <div style={{ fontSize:13, color:T.text, fontWeight:600, wordBreak:'break-all' }}>{user?.email || '—'}</div>
+                </div>
+                {/* Account info */}
+                <div style={{ padding:'12px 16px', borderBottom:`1px solid ${T.border}` }}>
+                  <div style={{ fontSize:11, color:T.muted, fontWeight:700, letterSpacing:'.06em', marginBottom:8 }}>PROP ACCOUNT</div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                    <span style={{ fontSize:12, color:T.sub }}>Firm</span>
+                    <span style={{ fontSize:12, color:T.text, fontWeight:700 }}>{accountView?.firm || '—'}</span>
+                  </div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                    <span style={{ fontSize:12, color:T.sub }}>Account size</span>
+                    <span style={{ fontSize:12, color:T.text, fontWeight:700 }}>{accountView?.size ? '$' + Number(accountView.size).toLocaleString() : '—'}</span>
+                  </div>
+                  <div style={{ display:'flex', justifyContent:'space-between' }}>
+                    <span style={{ fontSize:12, color:T.sub }}>Today P&amp;L</span>
+                    <span style={{ fontSize:12, fontWeight:700, color: (accountView?.todayPnL||0) >= 0 ? T.green : T.red }}>
+                      {(accountView?.todayPnL||0) >= 0 ? '+' : ''}{fmtUsd(accountView?.todayPnL||0)}
+                    </span>
+                  </div>
+                </div>
+                {/* Actions */}
+                <div style={{ padding:8 }}>
+                  <button onClick={() => { setShowAccMenu(false); onSetup && onSetup(); }}
+                    style={{ width:'100%', padding:'10px 12px', background:'rgba(255,255,255,0.05)', border:`1px solid ${T.border}`, borderRadius:9, color:T.text, fontSize:13, fontWeight:600, cursor:'pointer', textAlign:'left', marginBottom:6, display:'flex', alignItems:'center', gap:8 }}>
+                    <span>⚙</span> Configure Account
+                  </button>
+                  {onLogout && (
+                    <button onClick={() => { setShowAccMenu(false); onLogout(); }}
+                      style={{ width:'100%', padding:'10px 12px', background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:9, color:'#F87171', fontSize:13, fontWeight:600, cursor:'pointer', textAlign:'left', display:'flex', alignItems:'center', gap:8 }}>
+                      <span>↩</span> Sign Out
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
