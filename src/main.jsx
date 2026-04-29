@@ -6970,10 +6970,46 @@ function BacktestTab() {
 // APP SHELL
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MARKETS TAB — combines Today / Signals / Analytics / Calendar
+// ═══════════════════════════════════════════════════════════════════════════
+
+function MarketsTab({ data, phase, accountView, trades, onNavigate, initialSub }) {
+  const SUBS = [
+    { id:'today',     label:'Today',    icon:'◈' },
+    { id:'signals',   label:'Signals',  icon:'⚡' },
+    { id:'analytics', label:'Stats',    icon:'◉' },
+    { id:'calendar',  label:'Calendar', icon:'📅' },
+  ];
+  const [sub, setSub] = useState(initialSub || 'today');
+
+  return (
+    <div>
+      {/* Sub-tab bar */}
+      <div style={{ display:'flex', gap:4, marginBottom:20, padding:'4px', background:'rgba(255,255,255,0.04)', borderRadius:12, border:'1px solid rgba(255,255,255,0.07)', width:'fit-content' }}>
+        {SUBS.map(s => (
+          <button key={s.id} onClick={() => setSub(s.id)}
+            style={{ padding:'7px 18px', borderRadius:9, border:'none', cursor:'pointer', fontWeight:700, fontSize:13,
+              background: sub===s.id ? 'rgba(52,211,153,0.18)' : 'transparent',
+              color: sub===s.id ? T.green : T.muted,
+              boxShadow: sub===s.id ? `0 0 0 1px ${T.green}55` : 'none',
+              transition:'all 0.15s',
+            }}>
+            {s.icon} {s.label}
+          </button>
+        ))}
+      </div>
+
+      {sub === 'today'     && <TodayScreen data={data} phase={phase} accountView={accountView} trades={trades} onNavigate={onNavigate}/>}
+      {sub === 'signals'   && <SignalsWorkspace onNavigate={onNavigate}/>}
+      {sub === 'analytics' && <OutcomeAnalyticsPanel data={data}/>}
+      {sub === 'calendar'  && <EconomicCalendarTab/>}
+    </div>
+  );
+}
+
 const TABS = [
-  { id:'dashboard', label:'Today',     icon:'◈' },
-  { id:'signals',   label:'Signals',   icon:'⚡' },
-  { id:'news',      label:'Calendar',  icon:'📅' },
+  { id:'markets',   label:'Markets',   icon:'◈' },
   { id:'analyze',   label:'Analyze',   icon:'◬' },
   { id:'backtest',  label:'Backtest',  icon:'↺' },
   { id:'journal',   label:'Journal',   icon:'▦' },
@@ -6984,9 +7020,16 @@ const TABS = [
 function PropPilotAI({ pushMgr, user, onLogout }) {
   const hashScreen = useCallback(() => {
     const raw = window.location.hash.replace('#', '');
+    // Old deep-links: dashboard/signals/news/analytics → markets
+    if (['dashboard','signals','news','analytics'].includes(raw)) return 'markets';
     return TABS.some(t => t.id === raw) ? raw : null;
   }, []);
-  const [screen, setScreen] = useState(() => hashScreen() || LS.get('screen', 'dashboard'));
+  const [screen, setScreen] = useState(() => {
+    const saved = hashScreen() || LS.get('screen', 'markets');
+    // Migrate old saved values
+    if (['dashboard','signals','news','analytics'].includes(saved)) return 'markets';
+    return saved;
+  });
   const [phase, setPhase] = useState(() => LS.get('phase', 's1'));
   const [showSetup, setShowSetup] = useState(false);
   const [trades, setTrades] = useState(() => LS.get('trades', []));
@@ -7081,6 +7124,12 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
     return () => window.removeEventListener('hashchange', onHash);
   }, [hashScreen]);
 
+  // Remap legacy screen ids to new consolidated screens
+  const navigateTo = useCallback((id) => {
+    if (['dashboard','signals','news','analytics'].includes(id)) return setScreen('markets');
+    setScreen(id);
+  }, [setScreen]);
+
   const handleSetAccount = (acc) => setAccount(acc);
   const accountView = useMemo(() => {
     const ch = LS.get('challenge', null);
@@ -7116,7 +7165,7 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
         <OnboardingWizard
           user={user}
           onComplete={() => setShowOnboarding(false)}
-          onNavigate={setScreen}
+          onNavigate={navigateTo}
         />
       )}
       {showSetup && <SetupModal account={account} setAccount={handleSetAccount} onClose={() => setShowSetup(false)}/>}
@@ -7151,14 +7200,11 @@ function PropPilotAI({ pushMgr, user, onLogout }) {
         ) : (
           <>
             <TabBoundary key={screen}>
-              {screen === 'dashboard' && <TodayScreen data={appData} phase={phase} accountView={accountView} trades={trades} onNavigate={setScreen}/>}
-              {screen === 'signals'   && <SignalsWorkspace onNavigate={setScreen}/>}
-              {screen === 'news'      && <EconomicCalendarTab/>}
-              {screen === 'analyze'   && <CheckTrade account={accountView} phase={phase} onNavigate={setScreen}/>}
+              {screen === 'markets'   && <MarketsTab data={appData} phase={phase} accountView={accountView} trades={trades} onNavigate={navigateTo}/>}
+              {screen === 'analyze'   && <CheckTrade account={accountView} phase={phase} onNavigate={navigateTo}/>}
               {screen === 'backtest'  && <BacktestTab/>}
               {screen === 'journal'   && <Journal trades={trades} setTrades={handleTradesChange} plan={userPlan}/>}
               {screen === 'risk'      && <RiskCalc account={accountView}/>}
-              {screen === 'analytics' && <OutcomeAnalyticsPanel data={appData}/>}
               {screen === 'challenge' && <ChallengeMode account={accountView} phase={phase} userId={user?.id}/>}
               {screen === 'settings'  && <SettingsWorkbench data={appData} accountView={accountView} onUpdateAccount={() => setShowSetup(true)} plan={userPlan}/>}
             </TabBoundary>
