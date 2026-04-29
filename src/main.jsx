@@ -212,11 +212,15 @@ async function syncChallengeToSB(userId, challengeData) {
   if (!userId || !sbClient) return;
   try {
     const headers = await getAuthedJsonHeaders();
-    await fetch(`${SB_URL}/rest/v1/user_challenges`, {
+    const r = await fetch(`${SB_URL}/rest/v1/user_challenges?on_conflict=user_id`, {
       method: 'POST',
       headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({ user_id: userId, challenge_data: challengeData, updated_at: new Date().toISOString() }),
     });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      console.warn('[sync] Challenge upload failed:', r.status, txt);
+    }
   } catch(e) { console.warn('[sync] Challenge upload failed:', e); }
 }
 
@@ -255,7 +259,7 @@ async function saveUserProfile(userId, updates) {
   if (!userId || !sbClient) return;
   try {
     const headers = await getAuthedJsonHeaders();
-    await fetch(`${SB_URL}/rest/v1/user_profiles`, {
+    await fetch(`${SB_URL}/rest/v1/user_profiles?on_conflict=id`, {
       method: 'POST',
       headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify({ id: userId, ...updates, updated_at: new Date().toISOString() }),
